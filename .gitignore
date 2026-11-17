@@ -1,0 +1,14 @@
+__pycache__/
+*.pyc
+.venv/
+.pytest_cache/
+.ruff_cache/
+*.egg-info/
+
+# data is too big for git: download Project.zip from Inside into data/raw/
+data/raw/
+data/processed/
+
+# model outputs (tracked in MLflow / Minio instead)
+artifacts/
+mlruns/
