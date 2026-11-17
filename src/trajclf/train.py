@@ -37,6 +37,7 @@ from trajclf.config import (
     SIGNAL_COLS,
     WINDOW_SIZE,
     WINDOW_STRIDE,
+    load_params,
 )
 from trajclf.data import load_processed
 from trajclf.features import N_FEATURES, Normalizer, make_windows, preprocess
@@ -226,20 +227,32 @@ def log_to_mlflow(out_dir: Path, result: dict, experiment: str, register_name: s
 
 
 def main() -> None:
+    params = load_params()
+    tp = params["train"]
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--data-dir", type=Path, default=PROCESSED_DIR)
     parser.add_argument("--out-dir", type=Path, default=ARTIFACTS_DIR)
-    parser.add_argument("--epochs", type=int, default=12)
-    parser.add_argument("--batch-size", type=int, default=64)
-    parser.add_argument("--lr", type=float, default=1e-3)
-    parser.add_argument("--width", type=int, default=16)
-    parser.add_argument("--seed", type=int, default=SEED)
+    parser.add_argument("--epochs", type=int, default=tp["epochs"])
+    parser.add_argument("--lr", type=float, default=tp["lr"])
+    parser.add_argument("--width", type=int, default=tp["width"])
     parser.add_argument("--experiment", default="ride-classification")
     parser.add_argument("--register-name", default=None, help="Register the model in the MLflow Model Registry")
     args = parser.parse_args()
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 
-    _, result = train(args.data_dir, args.out_dir, args.epochs, args.batch_size, args.lr, args.width, seed=args.seed)
+    _, result = train(
+        args.data_dir,
+        args.out_dir,
+        epochs=args.epochs,
+        batch_size=tp["batch_size"],
+        lr=args.lr,
+        width=args.width,
+        window=params["features"]["window"],
+        stride=params["features"]["stride"],
+        seed=params["seed"],
+        noise=tp["noise"],
+        dropout=tp["dropout"],
+    )
     print(json.dumps(result["metrics"], indent=2))
     print(result["confusion_matrix"].to_string())
 

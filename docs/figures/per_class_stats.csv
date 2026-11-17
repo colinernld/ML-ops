@@ -1,0 +1,6 @@
+label,minutes,acc_std,rot_mean,rot_p99
+Safe,4.88,0.93,15.54,74.35
+Safe overall,4.8,0.96,21.39,93.5
+Bad weather,4.88,0.86,15.64,73.99
+Tandem,4.42,0.71,16.59,71.92
+Reckless,5.65,1.38,33.94,139.25
