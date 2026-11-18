@@ -12,3 +12,6 @@ data/processed/
 # model outputs (tracked in MLflow / Minio instead)
 artifacts/
 mlruns/
+
+# secrets (commit .env.example with fake values instead)
+.env
