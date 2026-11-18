@@ -19,6 +19,7 @@ import torch
 from trajclf.config import SIGNAL_COLS
 from trajclf.features import Normalizer, make_windows, preprocess
 from trajclf.model import RideCNN
+from trajclf.validation import validate_ride
 
 MODEL_FILE = "model.pt"
 CONFIG_FILE = "model_config.json"
@@ -54,18 +55,13 @@ class RideClassifier:
     @staticmethod
     def to_signal(ride: np.ndarray | pd.DataFrame) -> np.ndarray:
         """Accept a DataFrame (columns ax..rz) or a (T, 6) array; fill gaps like in training."""
-        if isinstance(ride, pd.DataFrame):
-            missing = [c for c in SIGNAL_COLS if c not in ride.columns]
-            if missing:
-                raise ValueError(f"Missing columns: {missing}")
-            if "time_index" in ride.columns:
-                ride = ride.sort_values("time_index")
-            ride = ride[SIGNAL_COLS]
-        else:
-            ride = pd.DataFrame(np.asarray(ride, dtype=np.float32), columns=SIGNAL_COLS)
-        if len(ride) == 0:
-            raise ValueError("Empty ride")
-        ride = ride.astype(np.float32).interpolate(limit_direction="both").fillna(0.0)
+        if not isinstance(ride, pd.DataFrame):
+            arr = np.asarray(ride, dtype=np.float32)
+            if arr.ndim != 2 or arr.shape[1] != len(SIGNAL_COLS):
+                raise ValueError(f"Expected an array of shape (T, {len(SIGNAL_COLS)}), got {arr.shape}")
+            ride = pd.DataFrame(arr, columns=SIGNAL_COLS)
+        ride = validate_ride(ride)[SIGNAL_COLS].astype(np.float32)
+        ride = ride.interpolate(limit_direction="both").fillna(0.0)
         return ride.to_numpy(dtype=np.float32)
 
     @torch.no_grad()

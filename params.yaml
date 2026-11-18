@@ -1,0 +1,21 @@
+# Single source of truth for the pipeline hyper-parameters.
+# Every training run logs these values to MLflow, so any result can be reproduced.
+seed: 42
+
+data:
+  test_size: 0.2        # share of rides kept for the final hold-out test (stratified by label)
+
+features:
+  window: 256           # samples per window (25.6 s at 10 Hz)
+  stride: 128           # 50 % overlap
+
+train:
+  epochs: 25            # chosen by 5-fold CV (see docs/experiments.md)
+  batch_size: 64
+  lr: 0.001
+  width: 16             # number of filters in the first conv block
+  dropout: 0.5
+  noise: 0.05           # augmentation: random scaling + gaussian noise
+
+evaluate:
+  folds: 5

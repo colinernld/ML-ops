@@ -15,7 +15,8 @@ import numpy as np
 import pandas as pd
 from sklearn.model_selection import train_test_split
 
-from trajclf.config import CLASSES, PROCESSED_DIR, RAW_DIR, SEED, SIGNAL_COLS
+from trajclf.config import CLASSES, PROCESSED_DIR, RAW_DIR, SEED, SIGNAL_COLS, load_params
+from trajclf.validation import DataValidationError, validate_dataset
 
 log = logging.getLogger(__name__)
 
@@ -45,12 +46,20 @@ def clean_ride(ride: pd.DataFrame) -> pd.DataFrame:
     return ride
 
 
-def load_rides(path: str | Path) -> dict[str, np.ndarray]:
+def read_raw(path: str | Path) -> pd.DataFrame:
+    return pd.read_parquet(path, columns=["ride_id", "time_index", *SIGNAL_COLS])
+
+
+def rides_from_frame(df: pd.DataFrame) -> dict[str, np.ndarray]:
     """Return {ride_id: array of shape (T, 6)} with cleaned float32 signals."""
-    df = pd.read_parquet(path, columns=["ride_id", "time_index", *SIGNAL_COLS])
     rides = {}
     for ride_id, ride in df.groupby("ride_id", sort=True):
         rides[ride_id] = clean_ride(ride)[SIGNAL_COLS].to_numpy(dtype=np.float32)
+    return rides
+
+
+def load_rides(path: str | Path) -> dict[str, np.ndarray]:
+    rides = rides_from_frame(read_raw(path))
     log.info("Loaded %d rides from %s", len(rides), path)
     return rides
 
@@ -65,17 +74,24 @@ def split_rides(labels: pd.Series, test_size: float = 0.2, seed: int = SEED) -> 
     return pd.concat([labels.rename("label"), split], axis=1).rename_axis("ride_id").reset_index()
 
 
-def prepare(raw_dir: Path = RAW_DIR, out_dir: Path = PROCESSED_DIR, test_size: float = 0.2) -> dict:
+def prepare(raw_dir: Path = RAW_DIR, out_dir: Path = PROCESSED_DIR, test_size: float = 0.2, seed: int = SEED) -> dict:
     """Full pipeline: raw parquet + csv -> processed/rides.npz + processed/split.csv."""
-    rides = load_rides(raw_dir / RIDES_FILE)
-    labels = load_labels(raw_dir / LABELS_FILE)
+    raw = read_raw(raw_dir / RIDES_FILE)
+    raw_labels = pd.read_csv(raw_dir / LABELS_FILE)
 
-    missing = set(labels.index) ^ set(rides)
-    if missing:
-        raise ValueError(f"{len(missing)} rides have a signal but no label (or the reverse)")
-
-    split = split_rides(labels, test_size=test_size)
+    # Quality gate: never train on data that fails validation
+    report = validate_dataset(raw, raw_labels)
     out_dir.mkdir(parents=True, exist_ok=True)
+    (out_dir / "validation_report.json").write_text(json.dumps(report.to_dict(), indent=2, default=int))
+    for warning in report.warnings:
+        log.warning("data validation: %s", warning)
+    if not report.passed:
+        raise DataValidationError("Data validation failed:\n- " + "\n- ".join(report.errors))
+    log.info("Data validation passed: %s", report.stats)
+
+    rides = rides_from_frame(raw)
+    labels = load_labels(raw_dir / LABELS_FILE)
+    split = split_rides(labels, test_size=test_size, seed=seed)
     np.savez_compressed(out_dir / "rides.npz", **rides)
     split.to_csv(out_dir / "split.csv", index=False)
 
@@ -99,10 +115,11 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--raw-dir", type=Path, default=RAW_DIR)
     parser.add_argument("--out-dir", type=Path, default=PROCESSED_DIR)
-    parser.add_argument("--test-size", type=float, default=0.2)
+    params = load_params()
+    parser.add_argument("--test-size", type=float, default=params["data"]["test_size"])
     args = parser.parse_args()
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
-    print(json.dumps(prepare(args.raw_dir, args.out_dir, args.test_size), indent=2))
+    print(json.dumps(prepare(args.raw_dir, args.out_dir, args.test_size, params["seed"]), indent=2, default=int))
 
 
 if __name__ == "__main__":

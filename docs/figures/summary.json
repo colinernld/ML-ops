@@ -1,0 +1,9 @@
+{
+  "n_rows": 1529547,
+  "n_rides": 500,
+  "missing_rows": 10201,
+  "rides_with_missing": 439,
+  "length_min": 1807,
+  "length_median": 2906,
+  "length_max": 4767
+}

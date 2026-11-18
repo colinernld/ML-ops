@@ -2,6 +2,8 @@
 
 from pathlib import Path
 
+import yaml
+
 # IMU channels: accelerometer (m/s^2) and gyroscope (deg/s), sampled every 100 ms (10 Hz)
 SIGNAL_COLS = ["ax", "ay", "az", "rx", "ry", "rz"]
 
@@ -19,3 +21,10 @@ ROOT = Path(__file__).resolve().parents[2]
 RAW_DIR = ROOT / "data" / "raw"
 PROCESSED_DIR = ROOT / "data" / "processed"
 ARTIFACTS_DIR = ROOT / "artifacts"
+PARAMS_FILE = ROOT / "params.yaml"
+
+
+def load_params(path: Path = PARAMS_FILE) -> dict:
+    """Read params.yaml (hyper-parameters shared by data prep, training and evaluation)."""
+    with open(path) as f:
+        return yaml.safe_load(f)
