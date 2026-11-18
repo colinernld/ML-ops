@@ -1,0 +1,98 @@
+# MLflow tracking server + model registry, backed by Postgres (metadata) and MinIO (artifacts).
+#
+#   cp .env.example .env        # once, then change the passwords
+#   docker compose up -d        # MLflow UI: http://localhost:5050   MinIO console: http://localhost:9001
+#   docker compose down         # stop (data is kept in Docker volumes; add -v to wipe it)
+#
+# Clients (training, API) only need MLFLOW_TRACKING_URI: the server proxies artifact uploads and
+# downloads to MinIO, so MinIO credentials never leave this file. See docs/mlflow.md.
+
+name: ride-mlops
+
+x-minio-image: &minio-image
+  # The official minio/minio image is no longer published; pgsty/minio is the maintained community build.
+  image: pgsty/minio:RELEASE.2026-08-04T00-00-00Z
+
+services:
+  minio:
+    <<: *minio-image
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:?copy .env.example to .env}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:?copy .env.example to .env}
+    ports:
+      - "127.0.0.1:${MINIO_API_PORT:-9000}:9000"
+      - "127.0.0.1:${MINIO_CONSOLE_PORT:-9001}:9001"
+    volumes:
+      - minio-data:/data
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+    restart: unless-stopped
+
+  # One-shot job: creates the bucket MLflow writes to, then exits.
+  minio-init:
+    <<: *minio-image
+    depends_on:
+      minio:
+        condition: service_healthy
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
+      MLFLOW_BUCKET: ${MLFLOW_BUCKET:-mlflow}
+    entrypoint: >
+      sh -c 'mc alias set store http://minio:9000 "$$MINIO_ROOT_USER" "$$MINIO_ROOT_PASSWORD"
+      && mc mb --ignore-existing "store/$$MLFLOW_BUCKET"'
+    restart: "no"
+
+  postgres:
+    image: postgres:17.11
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:?copy .env.example to .env}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?copy .env.example to .env}
+      POSTGRES_DB: ${POSTGRES_DB:-mlflow}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U \"$$POSTGRES_USER\" -d \"$$POSTGRES_DB\""]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+    restart: unless-stopped
+
+  mlflow:
+    build: docker/mlflow
+    image: ride-mlops/mlflow:3.18.0
+    depends_on:
+      postgres:
+        condition: service_healthy
+      minio-init:
+        condition: service_completed_successfully
+    environment:
+      MLFLOW_S3_ENDPOINT_URL: http://minio:9000
+      AWS_ACCESS_KEY_ID: ${MINIO_ROOT_USER}
+      AWS_SECRET_ACCESS_KEY: ${MINIO_ROOT_PASSWORD}
+      # Host names the server answers to; MLflow rejects any other Host header (DNS-rebinding protection).
+      MLFLOW_SERVER_ALLOWED_HOSTS: ${MLFLOW_ALLOWED_HOSTS:-localhost,localhost:*,127.0.0.1,127.0.0.1:*,mlflow,mlflow:*}
+    command: >
+      mlflow server
+      --host 0.0.0.0
+      --port 5000
+      --backend-store-uri postgresql+psycopg2://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-mlflow}
+      --serve-artifacts
+      --artifacts-destination s3://${MLFLOW_BUCKET:-mlflow}
+    ports:
+      - "127.0.0.1:${MLFLOW_PORT:-5050}:5000"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:5000/health')"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 20s
+    restart: unless-stopped
+
+volumes:
+  minio-data:
+  postgres-data:

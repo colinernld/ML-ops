@@ -15,3 +15,6 @@ mlruns/
 
 # secrets (commit .env.example with fake values instead)
 .env
+
+# macOS
+.DS_Store
