@@ -8,9 +8,11 @@ from the phone's accelerometer and gyroscope, with a full MLOps pipeline around 
 
 | Doc | Content |
 |---|---|
+| [CLAUDE.md](CLAUDE.md) | team status, course requirements, interfaces, open items (also read by AI assistants) |
 | [docs/data.md](docs/data.md) | dataset, exploration figures, data validation rules |
 | [docs/model_card.md](docs/model_card.md) | model, training, evaluation, limitations |
 | [docs/experiments.md](docs/experiments.md) | every variant tried and why the final one was kept |
+| [docs/mlflow.md](docs/mlflow.md) | MLflow + MinIO stack: start it, log runs, register and load the model |
 
 ## Quick start
 
@@ -25,19 +27,22 @@ python -m trajclf.data        # validate + clean + stratified split → data/pro
 python -m trajclf.train       # train CNN, evaluate on hold-out rides → artifacts/
 python -m trajclf.evaluate    # 5-fold cross-validation → artifacts/cv_results.csv
 python scripts/eda.py         # exploration figures → docs/figures/
-pytest                        # 19 tests
+pytest                        # 22 tests
 ```
 
 Hyper-parameters live in [`params.yaml`](params.yaml); command-line flags override them
 (`python -m trajclf.evaluate --epochs 40 --run-name more-epochs`).
 
-With an MLflow server running, training logs params, metrics, reports and registers the model;
-cross-validation runs are logged in a separate experiment to compare variants:
+With the MLflow stack running, training logs params, metrics, reports and registers the model;
+cross-validation runs are logged in a separate experiment to compare variants
+(details in [docs/mlflow.md](docs/mlflow.md)):
 
 ```bash
-export MLFLOW_TRACKING_URI=http://localhost:5000
+cp .env.example .env && docker compose up -d   # MLflow UI http://localhost:5050, MinIO http://localhost:9001
+export MLFLOW_TRACKING_URI=http://localhost:5050
 python -m trajclf.train --register-name ride-classifier    # experiment "ride-classification"
 python -m trajclf.evaluate --run-name baseline             # experiment "ride-classification-cv"
+python -m trajclf.promote                                  # newest version → @production if it beats baselines + production
 ```
 
 ## Pipeline
@@ -94,7 +99,7 @@ except DataValidationError as err:   # bad input → return HTTP 422 with str(er
 
 ```python
 import mlflow
-model = mlflow.pyfunc.load_model("models:/ride-classifier/1")
+model = mlflow.pyfunc.load_model("models:/ride-classifier@production")   # or a version: models:/ride-classifier/1
 model.predict(df)   # add a `ride_id` column to score several rides at once
 ```
 
@@ -106,6 +111,9 @@ model.predict(df)   # add a `ride_id` column to score several rides at once
 
 ```
 params.yaml        hyper-parameters (single source of truth)
+docker-compose.yml MLflow server + MinIO + Postgres   → docker compose up -d
+.env.example       settings for docker-compose (copy to .env)
+docker/mlflow/     MLflow server image
 src/trajclf/
   config.py        constants, paths, params loader
   validation.py    data quality checks (dataset + single ride)
@@ -116,8 +124,10 @@ src/trajclf/
   evaluate.py      k-fold cross-validation           → python -m trajclf.evaluate
   predict.py       RideClassifier (inference entry point)
   mlflow_model.py  MLflow pyfunc wrapper
+  promote.py       moves the @production alias in the registry  → python -m trajclf.promote
 scripts/eda.py     exploration figures and stats
+scripts/check_mlflow.py  checks the MLflow + MinIO stack end to end
 tests/             unit, validation and end-to-end tests (pytest)
-docs/              data, model card, experiments, figures
+docs/              data, model card, experiments, MLflow, figures
 examples/          sample rides as CSV
 ```

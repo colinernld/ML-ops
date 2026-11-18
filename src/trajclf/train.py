@@ -2,7 +2,7 @@
 
 Usage:
     python -m trajclf.train                       # local run, artifacts in ./artifacts
-    MLFLOW_TRACKING_URI=http://localhost:5000 python -m trajclf.train --register-name ride-classifier
+    MLFLOW_TRACKING_URI=http://localhost:5050 python -m trajclf.train --register-name ride-classifier
 """
 
 from __future__ import annotations
