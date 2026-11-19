@@ -1,0 +1,23 @@
+# Production stack on the local Kubernetes cluster (Docker Desktop):
+#   ./k8s/create-secrets.sh          # once: Secret `ride-secrets` from your .env
+#   kubectl apply -k k8s/            # everything else
+# The CD workflow (.github/workflows/cd.yml) then pins each image to the commit it was built from.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: ride-mlops
+labels:
+  - pairs: {app.kubernetes.io/part-of: ride-mlops}
+resources:
+  - namespace.yaml
+  - config.yaml
+  - postgres.yaml
+  - minio.yaml
+  - mlflow.yaml
+  - api.yaml
+  - webapp.yaml
+# Images published on Docker Hub by .github/workflows/docker-images.yml.
+# Docker Hub namespace: colinernld (change it here and in the DOCKERHUB_NAMESPACE repository variable if it moves).
+images:
+  - {name: ride-api, newName: docker.io/colinernld/ride-api, newTag: latest}
+  - {name: ride-webapp, newName: docker.io/colinernld/ride-webapp, newTag: latest}
+  - {name: ride-mlflow, newName: docker.io/colinernld/ride-mlflow, newTag: latest}

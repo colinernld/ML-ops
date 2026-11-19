@@ -1,0 +1,48 @@
+# Streamlit web app, calls the API through its Service. Open http://localhost:30851.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: webapp
+  labels: {app.kubernetes.io/name: webapp}
+spec:
+  replicas: 1
+  selector:
+    matchLabels: {app.kubernetes.io/name: webapp}
+  template:
+    metadata:
+      labels: {app.kubernetes.io/name: webapp}
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+      containers:
+        - name: webapp
+          image: ride-webapp
+          ports:
+            - {name: http, containerPort: 8501}
+          env:
+            - name: API_URL
+              valueFrom: {configMapKeyRef: {name: ride-config, key: API_URL}}
+          securityContext:
+            allowPrivilegeEscalation: false
+          readinessProbe:
+            httpGet: {path: /_stcore/health, port: http}
+            periodSeconds: 10
+          livenessProbe:
+            httpGet: {path: /_stcore/health, port: http}
+            periodSeconds: 20
+            failureThreshold: 5
+          resources:
+            requests: {cpu: 50m, memory: 128Mi}
+            limits: {memory: 512Mi}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: webapp
+  labels: {app.kubernetes.io/name: webapp}
+spec:
+  type: NodePort
+  selector: {app.kubernetes.io/name: webapp}
+  ports:
+    - {name: http, port: 8501, targetPort: http, nodePort: 30851}

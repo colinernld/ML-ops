@@ -1,0 +1,165 @@
+# Continuous deployment to the production Kubernetes cluster (Docker Desktop on the team's
+# production Mac), through a self-hosted GitHub Actions runner installed on that Mac.
+#
+# Triggers:
+# - the `docker-images` workflow finished successfully on main → deploy the images of that commit
+#   (tag sha-<commit>, immutable, so every deployment can be traced and rolled back);
+# - a push to main that only changes k8s/ → re-apply the manifests, keep the images already running;
+# - manual run (Actions → cd → Run workflow) with an image tag, e.g. to roll back to an older sha-xxxxxxx.
+#
+# Never runs on pull requests: code from a PR must not execute on the production machine.
+# Setup of the runner and of the cluster: docs/cicd.md and docs/kubernetes.md.
+name: cd
+
+on:
+  workflow_run:
+    workflows: [docker-images]
+    types: [completed]
+    branches: [main]
+  push:
+    branches: [main]
+    paths: ["k8s/**"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Image tag to deploy (latest, or sha-xxxxxxx to roll back)"
+        required: true
+        default: latest
+
+concurrency:
+  group: cd-production
+  cancel-in-progress: false   # never interrupt a deployment half-way
+
+permissions:
+  contents: read
+
+env:
+  KUBE_CONTEXT: docker-desktop
+  K8S_NAMESPACE: ride-mlops
+  IMAGE_NAMESPACE: ${{ vars.DOCKERHUB_NAMESPACE || 'colinernld' }}
+
+jobs:
+  deploy:
+    if: >-
+      github.repository == 'colinernld/ML-ops' &&
+      (github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success')
+    runs-on: [self-hosted, macOS]
+    timeout-minutes: 20
+    environment:
+      name: production
+      url: http://localhost:30851
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
+
+      - name: Tools in PATH
+        run: |
+          # Docker Desktop puts kubectl here; the runner service may not have it in its PATH.
+          {
+            echo "$HOME/.docker/bin"
+            echo "/usr/local/bin"
+            echo "/opt/homebrew/bin"
+          } >> "$GITHUB_PATH"
+
+      - name: Check the cluster and the secret
+        run: |
+          kubectl --context "$KUBE_CONTEXT" get nodes
+          if ! kubectl --context "$KUBE_CONTEXT" -n "$K8S_NAMESPACE" get secret ride-secrets >/dev/null 2>&1; then
+            echo "::error::Secret ride-secrets missing: run ./k8s/create-secrets.sh once on this Mac (docs/kubernetes.md)"
+            exit 1
+          fi
+
+      - name: Choose image tag
+        id: tag
+        env:
+          EVENT: ${{ github.event_name }}
+          HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
+          INPUT_TAG: ${{ inputs.tag }}
+        run: |
+          case "$EVENT" in
+            workflow_run)      tag="sha-${HEAD_SHA:0:7}" ;;
+            workflow_dispatch) tag="$INPUT_TAG" ;;
+            *)                 tag="" ;;   # manifests-only change: keep the running images
+          esac
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "Image tag: ${tag:-<unchanged>}"
+
+      - name: Remember the running images (manifests-only change)
+        if: steps.tag.outputs.tag == ''
+        run: |
+          for d in api webapp mlflow; do
+            img=$(kubectl --context "$KUBE_CONTEXT" -n "$K8S_NAMESPACE" get deploy "$d" \
+                  -o jsonpath='{.spec.template.spec.containers[0].image}' 2>/dev/null || true)
+            echo "IMG_${d}=${img}" >> "$GITHUB_ENV"
+          done
+
+      - name: Apply manifests
+        run: kubectl --context "$KUBE_CONTEXT" apply -k k8s/
+
+      - name: Set images
+        id: set-images
+        env:
+          TAG: ${{ steps.tag.outputs.tag }}
+        run: |
+          set_image() {  # deployment, container, image
+            if [ -n "$3" ]; then
+              kubectl --context "$KUBE_CONTEXT" -n "$K8S_NAMESPACE" set image "deployment/$1" "$2=$3"
+            fi
+          }
+          if [ -n "$TAG" ]; then
+            set_image api api "docker.io/$IMAGE_NAMESPACE/ride-api:$TAG"
+            set_image webapp webapp "docker.io/$IMAGE_NAMESPACE/ride-webapp:$TAG"
+            set_image mlflow mlflow "docker.io/$IMAGE_NAMESPACE/ride-mlflow:$TAG"
+          else
+            set_image api api "${IMG_api:-}"; set_image webapp webapp "${IMG_webapp:-}"; set_image mlflow mlflow "${IMG_mlflow:-}"
+          fi
+          kubectl --context "$KUBE_CONTEXT" -n "$K8S_NAMESPACE" annotate deployment api webapp mlflow \
+            --overwrite "kubernetes.io/change-cause=deploy ${TAG:-manifests} (commit ${GITHUB_SHA:0:7}, run ${GITHUB_RUN_ID})"
+
+      - name: Wait for the rollout
+        run: |
+          for d in mlflow webapp api; do
+            echo "::group::rollout $d"
+            if ! kubectl --context "$KUBE_CONTEXT" -n "$K8S_NAMESPACE" rollout status "deployment/$d" --timeout=6m; then
+              kubectl --context "$KUBE_CONTEXT" -n "$K8S_NAMESPACE" get pods -o wide
+              if [ "$d" = api ]; then
+                echo "::error::API pods are not ready. Is a model promoted to @production? (docs/kubernetes.md, step 4)"
+              fi
+              exit 1
+            fi
+            echo "::endgroup::"
+          done
+
+      - name: Smoke test
+        run: |
+          curl -fsS http://localhost:30550/health && echo " ← MLflow"
+          curl -fsS http://localhost:30800/ready && echo " ← API"
+          curl -fsS http://localhost:30851/_stcore/health && echo " ← web app"
+          curl -fsS -F "file=@examples/ride_safe.csv" http://localhost:30800/predict/file && echo " ← prediction"
+
+      # Only if the new images were actually set: a failure before that left production untouched.
+      - name: Roll back on failure
+        if: failure() && steps.set-images.outcome == 'success'
+        run: |
+          for d in api webapp mlflow; do
+            kubectl --context "$KUBE_CONTEXT" -n "$K8S_NAMESPACE" rollout undo "deployment/$d" || true
+          done
+          echo "::warning::Deployment failed: previous ReplicaSets restored (kubectl rollout undo)"
+
+      - name: Summary
+        if: success()
+        run: |
+          {
+            echo "### Deployed to production (Kubernetes on Docker Desktop)"
+            echo "| Service | URL |"
+            echo "|---|---|"
+            echo "| API (Swagger) | http://localhost:30800/docs |"
+            echo "| Web app | http://localhost:30851 |"
+            echo "| MLflow | http://localhost:30550 |"
+            echo "| MinIO console | http://localhost:30901 |"
+            echo
+            echo '```'
+            kubectl --context "$KUBE_CONTEXT" -n "$K8S_NAMESPACE" get deploy -o wide
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"

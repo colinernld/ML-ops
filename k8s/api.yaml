@@ -1,0 +1,66 @@
+# Prediction API. Loads models:/ride-classifier@production from MLflow at startup.
+# Readiness = a model is loaded (GET /ready): until a model is promoted the pod stays "not ready" and
+# receives no traffic. Swagger on http://localhost:30800/docs.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: api
+  labels: {app.kubernetes.io/name: api}
+spec:
+  replicas: 1   # 1 is enough on an 8 GB Mac; raise to 2+ on a bigger machine
+  strategy:
+    type: RollingUpdate
+    rollingUpdate: {maxUnavailable: 0, maxSurge: 1}   # zero-downtime deploys
+  selector:
+    matchLabels: {app.kubernetes.io/name: api}
+  template:
+    metadata:
+      labels: {app.kubernetes.io/name: api}
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "8000"
+        prometheus.io/path: /metrics
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+      containers:
+        - name: api
+          image: ride-api
+          ports:
+            - {name: http, containerPort: 8000}
+          env:
+            - name: MLFLOW_TRACKING_URI
+              valueFrom: {configMapKeyRef: {name: ride-config, key: MLFLOW_TRACKING_URI}}
+            - name: MODEL_URI
+              valueFrom: {configMapKeyRef: {name: ride-config, key: MODEL_URI}}
+            - name: RELOAD_TOKEN
+              valueFrom: {secretKeyRef: {name: ride-secrets, key: RELOAD_TOKEN, optional: true}}
+          securityContext:
+            allowPrivilegeEscalation: false
+          startupProbe:          # importing PyTorch + downloading the model can take a while
+            httpGet: {path: /health, port: http}
+            periodSeconds: 5
+            failureThreshold: 36
+          livenessProbe:
+            httpGet: {path: /health, port: http}
+            periodSeconds: 20
+            failureThreshold: 3
+          readinessProbe:
+            httpGet: {path: /ready, port: http}
+            periodSeconds: 10
+            failureThreshold: 3
+          resources:
+            requests: {cpu: 250m, memory: 512Mi}
+            limits: {memory: 1536Mi}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: api
+  labels: {app.kubernetes.io/name: api}
+spec:
+  type: NodePort
+  selector: {app.kubernetes.io/name: api}
+  ports:
+    - {name: http, port: 8000, targetPort: http, nodePort: 30800}

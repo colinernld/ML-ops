@@ -14,7 +14,7 @@ Runs on demand (Trigger DAG in the UI) and every Monday at 03:00. See docs/pipel
 from __future__ import annotations
 
 import os
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 from airflow.providers.standard.operators.bash import BashOperator
 from airflow.sdk import DAG, Param
@@ -49,7 +49,7 @@ with DAG(
     dag_id="ride_classifier_training",
     description="Validate data → train → register in MLflow → promote if better → reload the API",
     schedule="0 3 * * 1",
-    start_date=datetime(2026, 11, 1),
+    start_date=datetime(2026, 11, 1, tzinfo=timezone.utc),
     catchup=False,
     max_active_runs=1,
     default_args={"retries": 1, "retry_delay": timedelta(minutes=2)},
