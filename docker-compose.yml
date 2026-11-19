@@ -93,6 +93,38 @@ services:
       start_period: 20s
     restart: unless-stopped
 
+  # Training pipeline (issue #6): Airflow UI http://localhost:8080, DAG "ride_classifier_training".
+  # Optional, start it with:  docker compose --profile airflow up -d   (see docs/pipeline.md)
+  airflow:
+    profiles: ["airflow"]
+    build: docker/airflow
+    image: ride-mlops/airflow:3.4.0
+    command: airflow standalone
+    user: "${AIRFLOW_UID:-50000}:0"
+    depends_on:
+      mlflow:
+        condition: service_healthy
+    environment:
+      MLFLOW_TRACKING_URI: http://mlflow:5000
+      # API to reload after a promotion. Default: the API running on your laptop (uvicorn on port 8000).
+      API_URL: ${PIPELINE_API_URL:-http://host.docker.internal:8000}
+      RELOAD_TOKEN: ${RELOAD_TOKEN:-}
+      # Dev only: no login screen (every visitor is admin). Ports are bound to 127.0.0.1 anyway.
+      AIRFLOW__CORE__SIMPLE_AUTH_MANAGER_ALL_ADMINS: "true"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - .:/opt/project   # code, params.yaml, dags/, data/raw (input) and data/processed + artifacts/ (outputs)
+    ports:
+      - "127.0.0.1:${AIRFLOW_PORT:-8080}:8080"
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8080/api/v2/monitor/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 20
+      start_period: 60s
+    restart: unless-stopped
+
 volumes:
   minio-data:
   postgres-data:

@@ -13,6 +13,7 @@ from the phone's accelerometer and gyroscope, with a full MLOps pipeline around 
 | [docs/model_card.md](docs/model_card.md) | model, training, evaluation, limitations |
 | [docs/experiments.md](docs/experiments.md) | every variant tried and why the final one was kept |
 | [docs/mlflow.md](docs/mlflow.md) | MLflow + MinIO stack: start it, log runs, register and load the model |
+| [docs/pipeline.md](docs/pipeline.md) | training pipeline: Airflow DAG validate → train → promote → reload API |
 | [docs/api.md](docs/api.md) | prediction API (FastAPI, Swagger) and Streamlit web app: run, endpoints, config, metrics |
 
 ## Quick start
@@ -137,6 +138,9 @@ src/trajclf/
   predict.py       RideClassifier (inference entry point)
   mlflow_model.py  MLflow pyfunc wrapper
   promote.py       moves the @production alias in the registry  → python -m trajclf.promote
+  pipeline.py      pipeline steps used by the Airflow DAG       → python -m trajclf.pipeline all
+dags/              Airflow DAG ride_classifier_training (training pipeline)
+docker/airflow/    Airflow image (docker compose --profile airflow up -d)
 src/api/           FastAPI service: /predict, /predict/file, /model, /health, /ready, /metrics
 webapp/app.py      Streamlit web app (calls the API)
 scripts/eda.py     exploration figures and stats

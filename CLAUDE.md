@@ -37,6 +37,7 @@ Reckless**, with a full MLOps pipeline around it. Data: `Project.zip` on Inside 
 | MLflow + MinIO | done | `docker-compose.yml`, `docker/mlflow/`, `src/trajclf/promote.py`, [docs/mlflow.md](docs/mlflow.md) |
 | API (FastAPI) + web app (Streamlit) | done | `src/api/`, `webapp/`, [docs/api.md](docs/api.md) |
 | Docker + Kubernetes + CI/CD | to do | `docker/`, `k8s/`, `.github/workflows/` |
+| Training pipeline (Airflow DAG) | done (Airflow image: first build on Docker Desktop to confirm) | `dags/`, `src/trajclf/pipeline.py`, `docker/airflow/`, [docs/pipeline.md](docs/pipeline.md) |
 | Monitoring + README + slides | to do | `monitoring/`, `README.md` |
 
 ## Interfaces to build on
@@ -59,6 +60,10 @@ Reckless**, with a full MLOps pipeline around it. Data: `Project.zip` on Inside 
   (requests, latency, predictions per class, confidence, input drift). Config by env only: `MLFLOW_TRACKING_URI`,
   `MODEL_URI` (default `models:/ride-classifier@production`), `MODEL_DIR` (local model, overrides), `RELOAD_TOKEN`.
   After `trajclf.promote`, `POST /model/reload` (or restart the pod) serves the new version.
+- **Training pipeline**: Airflow DAG `ride_classifier_training` (validate → train + register → promote if
+  better → reload the API). `docker compose --profile airflow up -d` → <http://localhost:8080>. Same steps
+  without Airflow: `python -m trajclf.pipeline <prepare|train|cv|promote|reload|all>` (reuse it for the GitHub
+  Actions retraining job). Details in [docs/pipeline.md](docs/pipeline.md).
 - **Web app**: `API_URL=http://localhost:8000 streamlit run webapp/app.py` (port 8501). Calls the API only: its
   image needs no PyTorch.
 - **Monitoring ideas**: end of [docs/model_card.md](docs/model_card.md); metrics already exposed are listed in
@@ -80,8 +85,6 @@ it from your PR with `Closes #N`, and remove the line here once it is merged.
   Kubernetes** (production). Docker + K8s part.
 - [#5](https://github.com/colinernld/ML-ops/issues/5) **Push our images to Docker Hub** (API, web app,
   MLflow server) and list the URLs in the README. Needs a team Docker Hub account.
-- [#6](https://github.com/colinernld/ML-ops/issues/6) **Pipeline/workflow DAGs** (Airflow or other),
-  required by the brief. No owner yet.
 - [#7](https://github.com/colinernld/ML-ops/issues/7) **Results differ by environment** (5-fold CV with
   torch 2.14.1: balanced accuracy 0.36, macro-F1 0.31 vs 0.44 / 0.36 in the README, still above the
   baselines) and **both example rides are predicted "Safe overall"**: keep in mind for the API demo.
