@@ -13,6 +13,7 @@ from the phone's accelerometer and gyroscope, with a full MLOps pipeline around 
 | [docs/model_card.md](docs/model_card.md) | model, training, evaluation, limitations |
 | [docs/experiments.md](docs/experiments.md) | every variant tried and why the final one was kept |
 | [docs/mlflow.md](docs/mlflow.md) | MLflow + MinIO stack: start it, log runs, register and load the model |
+| [docs/api.md](docs/api.md) | prediction API (FastAPI, Swagger) and Streamlit web app: run, endpoints, config, metrics |
 
 ## Quick start
 
@@ -27,7 +28,7 @@ python -m trajclf.data        # validate + clean + stratified split → data/pro
 python -m trajclf.train       # train CNN, evaluate on hold-out rides → artifacts/
 python -m trajclf.evaluate    # 5-fold cross-validation → artifacts/cv_results.csv
 python scripts/eda.py         # exploration figures → docs/figures/
-pytest                        # 22 tests
+pytest                        # 39 tests
 ```
 
 Hyper-parameters live in [`params.yaml`](params.yaml); command-line flags override them
@@ -43,6 +44,14 @@ export MLFLOW_TRACKING_URI=http://localhost:5050
 python -m trajclf.train --register-name ride-classifier    # experiment "ride-classification"
 python -m trajclf.evaluate --run-name baseline             # experiment "ride-classification-cv"
 python -m trajclf.promote                                  # newest version → @production if it beats baselines + production
+```
+
+Serve the model and test it in the browser (details in [docs/api.md](docs/api.md)):
+
+```bash
+pip install -e ".[mlflow,api,webapp]"
+uvicorn api.main:app --app-dir src --port 8000              # Swagger: http://localhost:8000/docs
+API_URL=http://localhost:8000 streamlit run webapp/app.py   # web app: http://localhost:8501
 ```
 
 ## Pipeline
@@ -125,6 +134,8 @@ src/trajclf/
   predict.py       RideClassifier (inference entry point)
   mlflow_model.py  MLflow pyfunc wrapper
   promote.py       moves the @production alias in the registry  → python -m trajclf.promote
+src/api/           FastAPI service: /predict, /predict/file, /model, /health, /ready, /metrics
+webapp/app.py      Streamlit web app (calls the API)
 scripts/eda.py     exploration figures and stats
 scripts/check_mlflow.py  checks the MLflow + MinIO stack end to end
 tests/             unit, validation and end-to-end tests (pytest)

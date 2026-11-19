@@ -35,7 +35,7 @@ Reckless**, with a full MLOps pipeline around it. Data: `Project.zip` on Inside 
 |---|---|---|
 | Data + model | done | `src/trajclf/`, [docs/data.md](docs/data.md), [docs/model_card.md](docs/model_card.md) |
 | MLflow + MinIO | done | `docker-compose.yml`, `docker/mlflow/`, `src/trajclf/promote.py`, [docs/mlflow.md](docs/mlflow.md) |
-| API (FastAPI) + web app (Streamlit) | to do | `src/api/`, `webapp/` |
+| API (FastAPI) + web app (Streamlit) | done | `src/api/`, `webapp/`, [docs/api.md](docs/api.md) |
 | Docker + Kubernetes + CI/CD | to do | `docker/`, `k8s/`, `.github/workflows/` |
 | Monitoring + README + slides | to do | `monitoring/`, `README.md` |
 
@@ -54,7 +54,15 @@ Reckless**, with a full MLOps pipeline around it. Data: `Project.zip` on Inside 
 - **New model version** (also for retraining): `python -m trajclf.train --register-name ride-classifier`
   then `python -m trajclf.promote` (moves `@production` only if the new version beats both baselines and
   the current production version; the old one becomes `@previous`; rollback: `--version N`).
-- **Monitoring ideas**: end of [docs/model_card.md](docs/model_card.md).
+- **API** (details in [docs/api.md](docs/api.md)): `uvicorn api.main:app --app-dir src --port 8000`, Swagger at
+  `/docs`. Probes: liveness `GET /health`, readiness `GET /ready`. Prometheus metrics at `GET /metrics`
+  (requests, latency, predictions per class, confidence, input drift). Config by env only: `MLFLOW_TRACKING_URI`,
+  `MODEL_URI` (default `models:/ride-classifier@production`), `MODEL_DIR` (local model, overrides), `RELOAD_TOKEN`.
+  After `trajclf.promote`, `POST /model/reload` (or restart the pod) serves the new version.
+- **Web app**: `API_URL=http://localhost:8000 streamlit run webapp/app.py` (port 8501). Calls the API only: its
+  image needs no PyTorch.
+- **Monitoring ideas**: end of [docs/model_card.md](docs/model_card.md); metrics already exposed are listed in
+  [docs/api.md](docs/api.md#metrics-for-monitoring-get-metrics).
 
 ## Gotchas
 
