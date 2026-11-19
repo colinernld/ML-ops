@@ -43,6 +43,7 @@ spec:
           args:
             - --host=0.0.0.0
             - --port=5000
+            - --workers=1          # default is 4 web workers: too much memory for a laptop cluster
             - --backend-store-uri=postgresql+psycopg2://$(POSTGRES_USER):$(POSTGRES_PASSWORD)@postgres:5432/$(POSTGRES_DB)
             - --serve-artifacts
             - --artifacts-destination=s3://$(MLFLOW_BUCKET)
@@ -59,26 +60,31 @@ spec:
               valueFrom: {configMapKeyRef: {name: ride-config, key: MLFLOW_BUCKET}}
             - name: MLFLOW_SERVER_ALLOWED_HOSTS
               valueFrom: {configMapKeyRef: {name: ride-config, key: MLFLOW_SERVER_ALLOWED_HOSTS}}
+            # MLflow 3.x starts background job workers by default (GenAI evaluation jobs we do not use):
+            # they made the pod run out of memory on a laptop cluster.
+            - name: MLFLOW_SERVER_ENABLE_JOB_EXECUTION
+              value: "false"
             - name: MLFLOW_S3_ENDPOINT_URL
               value: http://minio:9000
             - name: AWS_ACCESS_KEY_ID
               valueFrom: {secretKeyRef: {name: ride-secrets, key: MINIO_ROOT_USER}}
             - name: AWS_SECRET_ACCESS_KEY
               valueFrom: {secretKeyRef: {name: ride-secrets, key: MINIO_ROOT_PASSWORD}}
+          # Probes send Host: localhost: MLflow rejects unknown Host headers (the pod IP would get 403).
           startupProbe:
-            httpGet: {path: /health, port: http}
+            httpGet: {path: /health, port: http, httpHeaders: [{name: Host, value: localhost}]}
             periodSeconds: 5
             failureThreshold: 36
           readinessProbe:
-            httpGet: {path: /health, port: http}
+            httpGet: {path: /health, port: http, httpHeaders: [{name: Host, value: localhost}]}
             periodSeconds: 10
           livenessProbe:
-            httpGet: {path: /health, port: http}
+            httpGet: {path: /health, port: http, httpHeaders: [{name: Host, value: localhost}]}
             periodSeconds: 20
             failureThreshold: 5
           resources:
-            requests: {cpu: 100m, memory: 384Mi}
-            limits: {memory: 1Gi}
+            requests: {cpu: 100m, memory: 512Mi}
+            limits: {memory: 2Gi}
 ---
 apiVersion: v1
 kind: Service
