@@ -28,7 +28,15 @@ RUN pip install ".[mlflow,api]" "mlflow==${MLFLOW_VERSION}" \
 # 3. Run as an unprivileged user (numeric uid for Kubernetes runAsNonRoot; MLflow caches models in $HOME).
 USER 10001
 
-ENV MODEL_URI=models:/ride-classifier@production
+# Defaults for Compose and Kubernetes (Service name "mlflow"); override with -e / env.
+# Few MLflow HTTP retries: if MLflow is down the API starts anyway (/health 200, /ready 503) instead of
+# blocking its startup for minutes. Without a tracking URI MLflow would try to create a local SQLite
+# database in a read-only folder and retry for minutes, so a URI is always set.
+ENV MODEL_URI=models:/ride-classifier@production \
+    MLFLOW_TRACKING_URI=http://mlflow:5000 \
+    MLFLOW_HTTP_REQUEST_MAX_RETRIES=2 \
+    MLFLOW_HTTP_REQUEST_BACKOFF_FACTOR=1 \
+    MLFLOW_HTTP_REQUEST_TIMEOUT=60
 EXPOSE 8000
 
 HEALTHCHECK --interval=15s --timeout=5s --start-period=30s --retries=5 \

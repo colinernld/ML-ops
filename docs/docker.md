@@ -36,7 +36,8 @@ rollbacks). Images are multi-architecture: `linux/amd64` and `linux/arm64` (Appl
 
 | Image | Variable | Default | Meaning |
 |---|---|---|---|
-| api | `MLFLOW_TRACKING_URI` | — | MLflow server, e.g. `http://mlflow:5000` |
+| api | `MLFLOW_TRACKING_URI` | `http://mlflow:5000` | MLflow server (Service name in Compose and Kubernetes) |
+| api | `MLFLOW_HTTP_REQUEST_MAX_RETRIES` | `2` | few retries, so the API starts quickly even if MLflow is down |
 | api | `MODEL_URI` | `models:/ride-classifier@production` | model to serve |
 | api | `MODEL_DIR` | — | local model folder (overrides `MODEL_URI`, for tests) |
 | api | `RELOAD_TOKEN` | — | secret for `POST /model/reload` |

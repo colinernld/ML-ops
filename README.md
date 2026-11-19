@@ -16,6 +16,8 @@ from the phone's accelerometer and gyroscope, with a full MLOps pipeline around 
 | [docs/pipeline.md](docs/pipeline.md) | training pipeline: Airflow DAG validate → train → promote → reload API |
 | [docs/api.md](docs/api.md) | prediction API (FastAPI, Swagger) and Streamlit web app: run, endpoints, config, metrics |
 | [docs/docker.md](docs/docker.md) | Docker images (API, web app, MLflow), Compose dev environment, Docker Hub publishing |
+| [docs/kubernetes.md](docs/kubernetes.md) | production on Kubernetes (Docker Desktop): first deployment, operations, rollback |
+| [docs/cicd.md](docs/cicd.md) | GitHub Actions: CI (lint, tests, manifests), image publishing, CD with a self-hosted runner |
 
 ## Quick start
 
@@ -74,6 +76,25 @@ Docker Hub images, built and pushed by GitHub Actions on every merge to `main`
 | API | https://hub.docker.com/r/colinernld/ride-api |
 | Web app | https://hub.docker.com/r/colinernld/ride-webapp |
 | MLflow server | https://hub.docker.com/r/colinernld/ride-mlflow |
+
+### Production (Kubernetes) and CI/CD
+
+All services run on the local Kubernetes cluster of Docker Desktop (namespace `ride-mlops`,
+manifests in [`k8s/`](k8s)), deployed automatically on every merge to `main`
+(details in [docs/kubernetes.md](docs/kubernetes.md) and [docs/cicd.md](docs/cicd.md)):
+
+```
+PR ─► ci (ruff, pytest, hadolint, kubeconform) + docker-images (build, smoke test) ─► review ─► merge
+main ─► docker-images (push sha-<commit> to Docker Hub) ─► cd (self-hosted runner: kubectl apply,
+        rollout, smoke test, automatic rollback)
+```
+
+| Service | Production URL |
+|---|---|
+| Web app | http://localhost:30851 |
+| API (Swagger) | http://localhost:30800/docs |
+| MLflow | http://localhost:30550 |
+| MinIO console | http://localhost:30901 |
 
 ## Pipeline
 

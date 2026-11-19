@@ -1,0 +1,14 @@
+# Non-secret settings shared by the pods. Secrets (passwords) live in the `ride-secrets` Secret,
+# created once from your .env by k8s/create-secrets.sh (never committed).
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: ride-config
+data:
+  POSTGRES_DB: mlflow
+  MLFLOW_BUCKET: mlflow
+  # Host names MLflow answers to (it rejects others): in-cluster Service names + the NodePort on localhost.
+  MLFLOW_SERVER_ALLOWED_HOSTS: "localhost,localhost:*,127.0.0.1,127.0.0.1:*,mlflow,mlflow:*,mlflow.ride-mlops,mlflow.ride-mlops:*,mlflow.ride-mlops.svc.cluster.local,mlflow.ride-mlops.svc.cluster.local:*"
+  MLFLOW_TRACKING_URI: http://mlflow:5000
+  MODEL_URI: models:/ride-classifier@production
+  API_URL: http://api:8000
