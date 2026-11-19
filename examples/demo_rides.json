@@ -1,0 +1,47 @@
+{
+  "model": "/Users/janegalthie/Documents/ML-ops/artifacts",
+  "split": "test (hold-out rides, never used for training)",
+  "test_accuracy_on_these_rides": 0.79,
+  "environment": {
+    "python": "3.12.16",
+    "torch": "2.15.0",
+    "os": "macOS-14.3-arm64-arm-64bit"
+  },
+  "rides": {
+    "ride_safe.csv": {
+      "label": "Safe",
+      "ride_id": "10e8a8f167e94df5239e743850cc81c54423ba037ba4c99825d0e6f087f74c97",
+      "predicted": "Safe",
+      "confidence": 0.6405,
+      "status": "correct"
+    },
+    "ride_safe_overall.csv": {
+      "label": "Safe overall",
+      "ride_id": "7f644537e1b67daff33a3695a467d10cce38665178e278782b350e89696fc648",
+      "predicted": "Safe overall",
+      "confidence": 0.5873,
+      "status": "correct"
+    },
+    "ride_bad_weather.csv": {
+      "label": "Bad weather",
+      "ride_id": "55a125c613ca448ed7ec721a9c04f0e63500247a93f66bc66ed1f20bd06a7e86",
+      "predicted": "Bad weather",
+      "confidence": 0.4141,
+      "status": "correct"
+    },
+    "ride_tandem.csv": {
+      "label": "Tandem",
+      "ride_id": "f391ebf22c9a5e3cb97bafcc5e639127b66ef8e4c90d2bd69c28bd49209535f1",
+      "predicted": "Safe overall",
+      "confidence": 0.357,
+      "status": "misclassified"
+    },
+    "ride_reckless.csv": {
+      "label": "Reckless",
+      "ride_id": "c3e962b4175b9683364f6bdc16fcf78601d3efe32b32fa85f7c5fad5f875aa9e",
+      "predicted": "Safe overall",
+      "confidence": 0.7963,
+      "status": "misclassified"
+    }
+  }
+}
