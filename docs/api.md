@@ -112,3 +112,9 @@ pytest tests/test_api.py
 - Env: `MLFLOW_TRACKING_URI=http://<mlflow service>:5000` (add that name to `MLFLOW_ALLOWED_HOSTS`),
   `RELOAD_TOKEN` from a Secret.
 - Prometheus: scrape `<api service>:8000/metrics`.
+
+## Screenshots
+
+| Swagger UI | Web app |
+|---|---|
+| ![Swagger](figures/api_swagger.png) | ![Web app](figures/webapp.png) |
