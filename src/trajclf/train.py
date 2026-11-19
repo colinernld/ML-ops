@@ -11,6 +11,7 @@ import argparse
 import json
 import logging
 import os
+import platform
 import random
 from pathlib import Path
 
@@ -211,6 +212,10 @@ def log_to_mlflow(out_dir: Path, result: dict, experiment: str, register_name: s
 
     mlflow.set_experiment(experiment)
     with mlflow.start_run() as run:
+        # Results depend on the library versions (issue #7): keep them with every run.
+        mlflow.set_tags(
+            {"env.python": platform.python_version(), "env.torch": torch.__version__, "env.os": platform.platform()}
+        )
         mlflow.log_params(result["params"])
         for step, loss in enumerate(result["history"], start=1):
             mlflow.log_metric("train_loss", loss, step=step)

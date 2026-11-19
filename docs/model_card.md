@@ -52,6 +52,22 @@ accuracy 0.33, macro-F1 0.34.
 | Tandem | 2 | 1 | 0 | 1 | 0 |
 | Reckless | 0 | 1 | 0 | 0 | 0 |
 
+## Reproducibility across environments
+
+The numbers above were obtained on the original training machine. The same code and seed give
+different scores with another PyTorch version or platform (CPU kernels are not bit-identical): on
+macOS arm64 / Python 3.11 / torch 2.14.1, 5-fold CV gives balanced accuracy 0.36 ± 0.10 and macro-F1
+0.31 ± 0.08 (still above both baselines, see issue #7). Every MLflow training run is therefore tagged
+with `env.python`, `env.torch` and `env.os`: compare models only within the same environment, and
+trust the run's own logged metrics over the figures in this document.
+
+## Demo rides
+
+`examples/ride_<class>.csv` are hold-out test rides picked by `scripts/pick_demo_rides.py` with the
+model the API serves; `examples/demo_rides.json` records, for each file, the true label, the
+prediction, the confidence and the environment. Classes the model gets wrong are kept and flagged
+`misclassified` rather than replaced by a training ride. Re-run the script after each promotion.
+
 ## Limitations
 
 - **Very small minority classes**: 6 Reckless, 18 Tandem, 22 Bad weather rides. Results vary a lot
