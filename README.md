@@ -81,8 +81,10 @@ The dataset is very imbalanced (83 % *Safe*, 6 *Reckless*), so always answering 
 | Accuracy | 0.69 ± 0.08 | 0.83 | 0.75 |
 
 The model beats both baselines on the metrics that matter for imbalanced data. Reckless recall
-(0.2 ± 0.45, one Reckless ride per fold) is not reliable yet. Details and limits in the
-[model card](docs/model_card.md); the 9 variants compared are in [experiments](docs/experiments.md).
+(0.2 ± 0.45, one Reckless ride per fold) is not reliable yet. Scores also vary with the PyTorch
+version and platform ([reproducibility](docs/model_card.md#reproducibility-across-environments)).
+Details and limits in the [model card](docs/model_card.md); the 9 variants compared are in
+[experiments](docs/experiments.md).
 
 ## Interfaces for the team
 
@@ -112,7 +114,8 @@ model = mlflow.pyfunc.load_model("models:/ride-classifier@production")   # or a 
 model.predict(df)   # add a `ride_id` column to score several rides at once
 ```
 
-**Example inputs** for the API / web app: `examples/ride_safe.csv`, `examples/ride_tandem.csv`.
+**Example inputs** for the API / web app: one hold-out test ride per class in `examples/`, chosen with
+`python scripts/pick_demo_rides.py` (what the model predicts for each is in `examples/demo_rides.json`).
 
 **Monitoring**: suggested drift metrics are listed at the end of the [model card](docs/model_card.md).
 
