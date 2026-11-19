@@ -68,3 +68,9 @@ python -m trajclf.pipeline promote          # one step; exit code 99 = productio
 In production the same image runs in the cluster (official Airflow Helm chart or a single `airflow standalone`
 Deployment), with `MLFLOW_TRACKING_URI` and `API_URL` pointing at the MLflow and API Services, and `RELOAD_TOKEN`
 from the same Secret as the API. The raw data must be on a volume mounted at `/opt/project/data/raw`.
+
+## Screenshot
+
+![Airflow DAG run](figures/airflow_dag.png)
+
+If a task fails with `return code -9`, Docker ran out of memory: raise it in Docker Desktop → Settings → Resources → Memory (6–8 GB).
