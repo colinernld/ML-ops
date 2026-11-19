@@ -1,0 +1,17 @@
+# Keep the build context small and never ship data or secrets in an image.
+.git
+.github
+.venv
+**/__pycache__
+**/.pytest_cache
+**/.ruff_cache
+*.egg-info
+.DS_Store
+.env
+data/
+artifacts/
+mlruns/
+docs/
+tests/
+dags/
+scripts/

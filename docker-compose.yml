@@ -2,6 +2,7 @@
 #
 #   cp .env.example .env        # once, then change the passwords
 #   docker compose up -d        # MLflow UI: http://localhost:5050   MinIO console: http://localhost:9001
+#                               # API: http://localhost:8000/docs     Web app: http://localhost:8501
 #   docker compose down         # stop (data is kept in Docker volumes; add -v to wipe it)
 #
 # Clients (training, API) only need MLFLOW_TRACKING_URI: the server proxies artifact uploads and
@@ -93,6 +94,39 @@ services:
       start_period: 20s
     restart: unless-stopped
 
+  # Prediction API (FastAPI): http://localhost:8000/docs. Serves models:/ride-classifier@production;
+  # until a model is promoted it starts anyway and /ready answers 503 (see docs/api.md).
+  api:
+    build:
+      context: .
+      dockerfile: docker/api/Dockerfile
+    image: ${IMAGE_NAMESPACE:-ride-mlops}/ride-api:${IMAGE_TAG:-dev}
+    depends_on:
+      mlflow:
+        condition: service_healthy
+    environment:
+      MLFLOW_TRACKING_URI: http://mlflow:5000
+      MODEL_URI: ${MODEL_URI:-models:/ride-classifier@production}
+      RELOAD_TOKEN: ${RELOAD_TOKEN:-}
+    ports:
+      - "127.0.0.1:${API_PORT:-8000}:8000"
+    restart: unless-stopped
+
+  # Web app (Streamlit): http://localhost:8501. Calls the API only.
+  webapp:
+    build:
+      context: .
+      dockerfile: docker/webapp/Dockerfile
+    image: ${IMAGE_NAMESPACE:-ride-mlops}/ride-webapp:${IMAGE_TAG:-dev}
+    depends_on:
+      api:
+        condition: service_started
+    environment:
+      API_URL: http://api:8000
+    ports:
+      - "127.0.0.1:${WEBAPP_PORT:-8501}:8501"
+    restart: unless-stopped
+
   # Training pipeline (issue #6): Airflow UI http://localhost:8080, DAG "ride_classifier_training".
   # Optional, start it with:  docker compose --profile airflow up -d   (see docs/pipeline.md)
   airflow:
@@ -106,8 +140,8 @@ services:
         condition: service_healthy
     environment:
       MLFLOW_TRACKING_URI: http://mlflow:5000
-      # API to reload after a promotion. Default: the API running on your laptop (uvicorn on port 8000).
-      API_URL: ${PIPELINE_API_URL:-http://host.docker.internal:8000}
+      # API to reload after a promotion. Default: the `api` container of this Compose project.
+      API_URL: ${PIPELINE_API_URL:-http://api:8000}
       RELOAD_TOKEN: ${RELOAD_TOKEN:-}
       # Dev only: no login screen (every visitor is admin). Ports are bound to 127.0.0.1 anyway.
       AIRFLOW__CORE__SIMPLE_AUTH_MANAGER_ALL_ADMINS: "true"

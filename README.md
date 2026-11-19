@@ -15,6 +15,7 @@ from the phone's accelerometer and gyroscope, with a full MLOps pipeline around 
 | [docs/mlflow.md](docs/mlflow.md) | MLflow + MinIO stack: start it, log runs, register and load the model |
 | [docs/pipeline.md](docs/pipeline.md) | training pipeline: Airflow DAG validate → train → promote → reload API |
 | [docs/api.md](docs/api.md) | prediction API (FastAPI, Swagger) and Streamlit web app: run, endpoints, config, metrics |
+| [docs/docker.md](docs/docker.md) | Docker images (API, web app, MLflow), Compose dev environment, Docker Hub publishing |
 
 ## Quick start
 
@@ -54,6 +55,25 @@ pip install -e ".[mlflow,api,webapp]"
 uvicorn api.main:app --app-dir src --port 8000              # Swagger: http://localhost:8000/docs
 API_URL=http://localhost:8000 streamlit run webapp/app.py   # web app: http://localhost:8501
 ```
+
+### Everything in Docker
+
+The whole dev environment (MLflow, MinIO, Postgres, API, web app) runs with Docker Compose
+(details in [docs/docker.md](docs/docker.md)):
+
+```bash
+cp .env.example .env && docker compose up -d --build
+# API http://localhost:8000/docs · web app http://localhost:8501 · MLflow http://localhost:5050
+```
+
+Docker Hub images, built and pushed by GitHub Actions on every merge to `main`
+(`latest` and `sha-<commit>` tags, amd64 + arm64):
+
+| Image | Docker Hub |
+|---|---|
+| API | https://hub.docker.com/r/colinernld/ride-api |
+| Web app | https://hub.docker.com/r/colinernld/ride-webapp |
+| MLflow server | https://hub.docker.com/r/colinernld/ride-mlflow |
 
 ## Pipeline
 
