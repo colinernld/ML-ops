@@ -1,0 +1,147 @@
+# Build the Docker images and publish them on Docker Hub (issue #5).
+#
+# - Pull request: build the images (amd64) and smoke-test the API and web app containers. Nothing is pushed.
+# - Push to main / manual run: build for amd64 + arm64 (Apple Silicon Macs) and push to Docker Hub
+#   with the tags `latest` and `sha-<commit>`.
+#
+# Images are built on GitHub's servers: nobody needs Docker or disk space locally.
+# One-time setup (repo Settings → Secrets and variables → Actions), see docs/docker.md:
+#   secrets   DOCKERHUB_USERNAME, DOCKERHUB_TOKEN (a Docker Hub access token, read & write)
+#   variable  DOCKERHUB_NAMESPACE (optional: Docker Hub user or organisation, defaults to DOCKERHUB_USERNAME)
+name: docker-images
+
+on:
+  pull_request:
+    paths:
+      - "src/**"
+      - "webapp/**"
+      - "examples/**"
+      - "docker/api/**"
+      - "docker/webapp/**"
+      - "docker/mlflow/**"
+      - "pyproject.toml"
+      - ".dockerignore"
+      - ".github/workflows/docker-images.yml"
+  push:
+    branches: [main]
+    paths:
+      - "src/**"
+      - "webapp/**"
+      - "examples/**"
+      - "docker/api/**"
+      - "docker/webapp/**"
+      - "docker/mlflow/**"
+      - "pyproject.toml"
+      - ".dockerignore"
+      - ".github/workflows/docker-images.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: docker-images-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: ${{ matrix.image }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - image: ride-api
+            context: .
+            dockerfile: docker/api/Dockerfile
+            port: 8000
+            health: /health
+          - image: ride-webapp
+            context: .
+            dockerfile: docker/webapp/Dockerfile
+            port: 8501
+            health: /_stcore/health
+          - image: ride-mlflow
+            context: docker/mlflow
+            dockerfile: docker/mlflow/Dockerfile
+            port: ""
+            health: ""
+    env:
+      PUBLISH: ${{ github.event_name != 'pull_request' }}
+      NAMESPACE: ${{ vars.DOCKERHUB_NAMESPACE || secrets.DOCKERHUB_USERNAME || 'colinernld' }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-qemu-action@v3
+        if: env.PUBLISH == 'true'
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Log in to Docker Hub
+        if: env.PUBLISH == 'true'
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Image tags
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.NAMESPACE }}/${{ matrix.image }}
+          tags: |
+            type=raw,value=latest,enable={{is_default_branch}}
+            type=sha,prefix=sha-
+            type=ref,event=pr
+
+      # Pull request: single-arch build loaded into the runner's Docker for the smoke test.
+      - name: Build (pull request)
+        if: env.PUBLISH != 'true'
+        uses: docker/build-push-action@v6
+        with:
+          context: ${{ matrix.context }}
+          file: ${{ matrix.dockerfile }}
+          platforms: linux/amd64
+          load: true
+          tags: ${{ matrix.image }}:test
+          cache-from: type=gha,scope=${{ matrix.image }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.image }}
+
+      - name: Smoke test (container starts and answers its health check)
+        if: env.PUBLISH != 'true' && matrix.health != ''
+        run: |
+          docker run -d --name smoke -p ${{ matrix.port }}:${{ matrix.port }} ${{ matrix.image }}:test
+          for i in $(seq 1 30); do
+            if curl -fsS "http://localhost:${{ matrix.port }}${{ matrix.health }}"; then
+              echo; echo "healthy after ${i} tries"; exit 0
+            fi
+            sleep 2
+          done
+          docker logs smoke
+          exit 1
+
+      # main: multi-arch build pushed to Docker Hub.
+      - name: Build and push (main)
+        if: env.PUBLISH == 'true'
+        uses: docker/build-push-action@v6
+        with:
+          context: ${{ matrix.context }}
+          file: ${{ matrix.dockerfile }}
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha,scope=${{ matrix.image }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.image }}
+
+      - name: Summary
+        if: env.PUBLISH == 'true'
+        run: |
+          {
+            echo "### ${{ matrix.image }}"
+            echo "https://hub.docker.com/r/${NAMESPACE}/${{ matrix.image }}"
+            echo '```'
+            echo "${{ steps.meta.outputs.tags }}"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
