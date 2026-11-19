@@ -51,26 +51,24 @@ kubectl -n ride-mlops get pods -w      # wait until postgres, minio, mlflow and 
 
 The API pod stays `0/1 Ready`: normal, there is no model in the production MLflow yet.
 
-**3. Train and register a model in the production MLflow** (from the laptop, data in `data/raw/`):
+**3. Train, register and promote a model inside the cluster** (no Python setup needed on the laptop).
+`k8s/train-in-cluster.sh` runs a one-off Job with the API image (PyTorch + MLflow + trajclf), the code
+of this repository and the raw data folder of this Mac mounted read-only. It validates the data, trains,
+registers the model in the production MLflow, promotes it to `@production` if it beats the baselines,
+then restarts the API. On an 8 GB Mac, pause the API during training to free memory:
 
 ```bash
-pip install -e ".[mlflow]"
-python -m trajclf.data
-export MLFLOW_TRACKING_URI=http://localhost:30550
-python -m trajclf.train --register-name ride-classifier
-python -m trajclf.promote              # sets @production if the model beats the baselines
-```
-
-MLflow proxies the upload to MinIO, so the laptop needs no MinIO credentials.
-
-**4. Load the model in the API**:
-
-```bash
-kubectl -n ride-mlops rollout restart deployment/api
+kubectl -n ride-mlops scale deployment/api --replicas=0
+./k8s/train-in-cluster.sh "/path/to/Project"     # folder with GBG500.parquet + GBG500_labels.csv
+kubectl -n ride-mlops scale deployment/api --replicas=1
 kubectl -n ride-mlops rollout status deployment/api     # 1/1 ready
 ```
 
-**5. Check**: http://localhost:30851 (web app), http://localhost:30800/docs (Swagger),
+Alternative from the laptop (needs `pip install -e ".[mlflow]"` and the data in `data/raw/`):
+`MLFLOW_TRACKING_URI=http://localhost:30550 python -m trajclf.train --register-name ride-classifier`,
+then `python -m trajclf.promote` and `kubectl -n ride-mlops rollout restart deployment/api`.
+
+**4. Check**: http://localhost:30851 (web app), http://localhost:30800/docs (Swagger),
 http://localhost:30550 (MLflow, model `ride-classifier` with alias `production`).
 
 ```bash
@@ -100,7 +98,8 @@ kubectl -n ride-mlops rollout undo deploy/api      # roll back the API to the pr
 |---|---|
 | `CreateContainerConfigError` | Secret missing: run `./k8s/create-secrets.sh` |
 | `ImagePullBackOff` | image not on Docker Hub yet, or wrong namespace in `k8s/kustomization.yaml` |
-| API `0/1 Ready` | no model `@production` in MLflow: step 3, then step 4 |
+| API `0/1 Ready` | no model `@production` in MLflow: step 3 |
+| `OOMKilled` (pod restarts) | not enough memory: Docker Desktop → Resources → Memory ≥ 6 GB, stop other containers, pause the API while training |
 | MLflow `Invalid Host header` | add the host name to `MLFLOW_SERVER_ALLOWED_HOSTS` in `k8s/config.yaml` |
 | `localhost:30xxx` does not answer | cluster type kind instead of kubeadm: use `kubectl -n ride-mlops port-forward svc/webapp 30851:8501` |
-| Start from scratch | `kubectl delete namespace ride-mlops` (⚠️ deletes the MLflow data), then steps 1–4 |
+| Start from scratch | `kubectl delete namespace ride-mlops` (⚠️ deletes the MLflow data), then steps 1–3 |
