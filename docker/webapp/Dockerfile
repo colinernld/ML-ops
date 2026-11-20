@@ -8,7 +8,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PIP_DISABLE_PIP_VERSION_CHECK=1
 
 WORKDIR /app
-RUN pip install "streamlit>=1.40,<2" "requests>=2.32" "pandas>=2.1"
+RUN pip install "streamlit>=1.50,<2" "requests>=2.32" "pandas>=2.1"
 
 # app.py looks for the sample rides in ../examples (EXAMPLES_DIR overrides it).
 COPY webapp/ webapp/
@@ -17,7 +17,9 @@ COPY examples/ examples/
 RUN useradd --create-home --uid 10001 app
 USER 10001
 
-ENV API_URL=http://api:8000
+ENV API_URL=http://api:8000 \
+    STREAMLIT_THEME_PRIMARY_COLOR="#2a78d6" \
+    STREAMLIT_CLIENT_TOOLBAR_MODE=viewer
 EXPOSE 8501
 
 HEALTHCHECK --interval=15s --timeout=5s --start-period=20s --retries=5 \
