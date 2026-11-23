@@ -1,0 +1,252 @@
+# Unit tests of the alert rules, run by CI:
+#   promtool test rules alerts_test.yml          (from monitoring/prometheus/)
+# Each test feeds synthetic series (one value per minute) and checks which alerts fire, with which
+# labels and annotations. The last test replays normal traffic and checks that NO alert fires.
+# Series notation: 'a+bxn' = a, a+b, ..., a+n*b (a counter growing by b per minute); 'axn' = a repeated.
+rule_files:
+  - alerts.yml
+
+evaluation_interval: 1m
+
+tests:
+  # ---------- 1 · infrastructure: MLflow health check fails, API not scraped, API memory high ----------
+  - interval: 1m
+    input_series:
+      - series: 'probe_success{job="health-checks", instance="http://mlflow:5000/health", service="mlflow"}'
+        values: '1 1 0x10'
+      - series: 'probe_success{job="health-checks", instance="http://api:8000/ready", service="api"}'
+        values: '1x12'
+      - series: 'up{job="ride-api", instance="api:8000"}'
+        values: '1 1 0x10'
+      - series: 'process_resident_memory_bytes{job="ride-api", instance="api:8000"}'
+        values: '1300000000x12'
+    alert_rule_test:
+      - eval_time: 3m   # failing for 1 minute only: pending, not firing yet
+        alertname: ServiceDown
+        exp_alerts: []
+      - eval_time: 5m
+        alertname: ServiceDown
+        exp_alerts:
+          - exp_labels: {severity: critical, layer: infrastructure, job: health-checks, instance: "http://mlflow:5000/health", service: mlflow}
+            exp_annotations:
+              summary: "mlflow does not answer its health check"
+              description: "Health check http://mlflow:5000/health has been failing for 2 minutes."
+      - eval_time: 5m
+        alertname: TargetDown
+        exp_alerts:
+          - exp_labels: {severity: critical, layer: infrastructure, job: ride-api, instance: "api:8000"}
+            exp_annotations:
+              summary: "Prometheus cannot scrape ride-api"
+              description: "Target api:8000 does not answer: the container or pod is down."
+      - eval_time: 10m
+        alertname: ApiMemoryHigh
+        exp_alerts:
+          - exp_labels: {severity: warning, layer: infrastructure, job: ride-api, instance: "api:8000"}
+            exp_annotations:
+              summary: "The API uses more than 1.2 GB of memory"
+              description: "api:8000 is close to its 1.5 GiB Kubernetes limit (risk of OOMKilled)."
+
+  # ---------- 2 · service: 1 prediction in 3 fails with 503, predictions take ~5 s ----------
+  - interval: 1m
+    input_series:
+      - series: 'api_requests_total{job="ride-api", instance="api:8000", method="POST", path="/predict", status="200"}'
+        values: '0+60x20'
+      - series: 'api_requests_total{job="ride-api", instance="api:8000", method="POST", path="/predict", status="503"}'
+        values: '0+30x20'
+      - series: 'api_requests_total{job="ride-api", instance="api:8000", method="GET", path="/health", status="200"}'
+        values: '0+600x20'   # health probes must not dilute the error rate
+      - series: 'api_request_duration_seconds_bucket{job="ride-api", instance="api:8000", method="POST", path="/predict", le="1"}'
+        values: '0x20'
+      - series: 'api_request_duration_seconds_bucket{job="ride-api", instance="api:8000", method="POST", path="/predict", le="2.5"}'
+        values: '0x20'
+      - series: 'api_request_duration_seconds_bucket{job="ride-api", instance="api:8000", method="POST", path="/predict", le="5"}'
+        values: '0+90x20'
+      - series: 'api_request_duration_seconds_bucket{job="ride-api", instance="api:8000", method="POST", path="/predict", le="+Inf"}'
+        values: '0+90x20'
+    alert_rule_test:
+      - eval_time: 10m
+        alertname: ApiHighErrorRate
+        exp_alerts:
+          - exp_labels: {severity: critical, layer: service}
+            exp_annotations:
+              summary: "More than 5 % of prediction requests fail (HTTP 5xx)"
+              description: "Usually no model is loaded (HTTP 503): check GET /ready and the @production alias in MLflow."
+      - eval_time: 10m
+        alertname: ApiSlowPredictions
+        exp_alerts:
+          - exp_labels: {severity: warning, layer: service}
+            exp_annotations:
+              summary: "95 % of predictions should take less than 2 s"
+              description: "Predictions are slow: CPU saturated or very long rides. Check the API CPU or add replicas."
+
+  # ---------- 3 · input data: rejected rides, acceleration in g, aggressive rotation, gaps, short rides ----------
+  - interval: 1m
+    input_series:
+      - series: 'api_requests_total{job="ride-api", instance="api:8000", method="POST", path="/predict", status="200"}'
+        values: '0+30x20'
+      - series: 'api_requests_total{job="ride-api", instance="api:8000", method="POST", path="/predict", status="422"}'
+        values: '0+30x20'
+      - series: 'prediction_errors_total{job="ride-api", instance="api:8000", reason="validation"}'
+        values: '0+30x20'
+      - series: 'ride_acc_magnitude_mean_sum{job="ride-api", instance="api:8000"}'
+        values: '0+57x20'      # 0.95 per ride: accelerometer sent in g
+      - series: 'ride_acc_magnitude_mean_count{job="ride-api", instance="api:8000"}'
+        values: '0+60x20'
+      - series: 'ride_rot_magnitude_mean_sum{job="ride-api", instance="api:8000"}'
+        values: '0+3000x20'    # 50 °/s per ride
+      - series: 'ride_rot_magnitude_mean_count{job="ride-api", instance="api:8000"}'
+        values: '0+60x20'
+      - series: 'ride_missing_ratio_sum{job="ride-api", instance="api:8000"}'
+        values: '0+9x20'       # 15 % of rows missing
+      - series: 'ride_missing_ratio_count{job="ride-api", instance="api:8000"}'
+        values: '0+60x20'
+      - series: 'ride_samples_sum{job="ride-api", instance="api:8000"}'
+        values: '0+18000x20'   # 300 samples = 30 s per ride
+      - series: 'ride_samples_count{job="ride-api", instance="api:8000"}'
+        values: '0+60x20'
+    alert_rule_test:
+      - eval_time: 10m
+        alertname: HighRejectionRate
+        exp_alerts:
+          - exp_labels: {severity: warning, layer: data}
+            exp_annotations:
+              summary: "More than 20 % of the rides sent are rejected (HTTP 413/422)"
+              description: "A client sends invalid rides: see prediction_errors_total by reason and the API logs."
+      - eval_time: 10m
+        alertname: AccelerationDrift
+        exp_alerts:
+          - exp_labels: {severity: warning, layer: data}
+            exp_annotations:
+              summary: "Mean acceleration of the rides is far from 9.5 m/s² (training data)"
+              description: "Accelerometer sent in g instead of m/s², or without gravity: predictions are unreliable."
+      - eval_time: 10m
+        alertname: RotationDrift
+        exp_alerts:
+          - exp_labels: {severity: warning, layer: data}
+            exp_annotations:
+              summary: "Mean rotation of the rides is outside 3 – 35 °/s (training data: 16 – 40 °/s per ride)"
+              description: "Gyroscope in rad/s instead of °/s, new phones or a new riding population: consider retraining."
+      - eval_time: 10m
+        alertname: MissingValuesDrift
+        exp_alerts:
+          - exp_labels: {severity: warning, layer: data}
+            exp_annotations:
+              summary: "Rides have more than 5 % missing sensor values (training data: 0.7 %)"
+              description: "Missing values are interpolated before scoring: many of them make predictions unreliable."
+      - eval_time: 10m
+        alertname: ShortRides
+        exp_alerts:
+          - exp_labels: {severity: warning, layer: data}
+            exp_annotations:
+              summary: "Rides are shorter than 1 minute on average (training data: 3 – 8 minutes)"
+              description: "The model scores 25.6 s windows: very short rides give few windows and unreliable predictions."
+
+  # ---------- 4 · model: no model loaded, every ride predicted Safe with low confidence ----------
+  - interval: 1m
+    input_series:
+      - series: 'model_loaded{job="ride-api", instance="api:8000"}'
+        values: '0x20'
+      - series: 'predictions_total{job="ride-api", instance="api:8000", label="Safe"}'
+        values: '0+60x20'
+      - series: 'prediction_confidence_sum{job="ride-api", instance="api:8000"}'
+        values: '0+18x20'      # 0.30 on average
+      - series: 'prediction_confidence_count{job="ride-api", instance="api:8000"}'
+        values: '0+60x20'
+    alert_rule_test:
+      - eval_time: 5m
+        alertname: ModelNotLoaded
+        exp_alerts:
+          - exp_labels: {severity: critical, layer: model, job: ride-api, instance: "api:8000"}
+            exp_annotations:
+              summary: "The API has no model to serve"
+              description: "api:8000 could not load models:/ride-classifier@production: is a version promoted?"
+      - eval_time: 10m
+        alertname: PredictionDistributionDrift
+        exp_alerts:
+          - exp_labels: {severity: warning, layer: model}
+            exp_annotations:
+              summary: "Share of rides predicted Safe is outside 50 – 97 % (expected ≈ 83 %)"
+              description: "Output drift: the inputs changed, or the model collapsed to a single class. Check the input panels."
+      - eval_time: 10m
+        alertname: LowPredictionConfidence
+        exp_alerts:
+          - exp_labels: {severity: warning, layer: model}
+            exp_annotations:
+              summary: "Mean confidence of the predictions is below 35 %"
+              description: "The model hesitates between classes: rides unlike the training data. Check the input panels."
+
+  # ---------- 4 · model: no ride predicted Safe at all (the Safe series does not even exist) ----------
+  - interval: 1m
+    input_series:
+      - series: 'predictions_total{job="ride-api", instance="api:8000", label="Reckless"}'
+        values: '0+60x20'
+    alert_rule_test:
+      - eval_time: 10m
+        alertname: PredictionDistributionDrift
+        exp_alerts:
+          - exp_labels: {severity: warning, layer: model}
+            exp_annotations:
+              summary: "Share of rides predicted Safe is outside 50 – 97 % (expected ≈ 83 %)"
+              description: "Output drift: the inputs changed, or the model collapsed to a single class. Check the input panels."
+
+  # ---------- normal traffic, like the training data: no alert at all ----------
+  - interval: 1m
+    input_series:
+      - series: 'up{job="ride-api", instance="api:8000"}'
+        values: '1x20'
+      - series: 'probe_success{job="health-checks", instance="http://api:8000/ready", service="api"}'
+        values: '1x20'
+      - series: 'process_resident_memory_bytes{job="ride-api", instance="api:8000"}'
+        values: '600000000x20'
+      - series: 'model_loaded{job="ride-api", instance="api:8000"}'
+        values: '1x20'
+      - series: 'api_requests_total{job="ride-api", instance="api:8000", method="POST", path="/predict", status="200"}'
+        values: '0+60x20'
+      - series: 'api_requests_total{job="ride-api", instance="api:8000", method="POST", path="/predict", status="422"}'
+        values: '0+1x20'
+      - series: 'prediction_errors_total{job="ride-api", instance="api:8000", reason="validation"}'
+        values: '0+1x20'
+      - series: 'api_request_duration_seconds_bucket{job="ride-api", instance="api:8000", method="POST", path="/predict", le="0.25"}'
+        values: '0+59x20'
+      - series: 'api_request_duration_seconds_bucket{job="ride-api", instance="api:8000", method="POST", path="/predict", le="0.5"}'
+        values: '0+61x20'
+      - series: 'api_request_duration_seconds_bucket{job="ride-api", instance="api:8000", method="POST", path="/predict", le="+Inf"}'
+        values: '0+61x20'
+      - series: 'predictions_total{job="ride-api", instance="api:8000", label="Safe"}'
+        values: '0+50x20'
+      - series: 'predictions_total{job="ride-api", instance="api:8000", label="Safe overall"}'
+        values: '0+10x20'
+      - series: 'prediction_confidence_sum{job="ride-api", instance="api:8000"}'
+        values: '0+36x20'
+      - series: 'prediction_confidence_count{job="ride-api", instance="api:8000"}'
+        values: '0+60x20'
+      - series: 'ride_acc_magnitude_mean_sum{job="ride-api", instance="api:8000"}'
+        values: '0+570x20'
+      - series: 'ride_acc_magnitude_mean_count{job="ride-api", instance="api:8000"}'
+        values: '0+60x20'
+      - series: 'ride_rot_magnitude_mean_sum{job="ride-api", instance="api:8000"}'
+        values: '0+1080x20'
+      - series: 'ride_rot_magnitude_mean_count{job="ride-api", instance="api:8000"}'
+        values: '0+60x20'
+      - series: 'ride_missing_ratio_sum{job="ride-api", instance="api:8000"}'
+        values: '0+0.3x20'
+      - series: 'ride_missing_ratio_count{job="ride-api", instance="api:8000"}'
+        values: '0+60x20'
+      - series: 'ride_samples_sum{job="ride-api", instance="api:8000"}'
+        values: '0+150000x20'
+      - series: 'ride_samples_count{job="ride-api", instance="api:8000"}'
+        values: '0+60x20'
+    alert_rule_test:
+      - {eval_time: 15m, alertname: ServiceDown, exp_alerts: []}
+      - {eval_time: 15m, alertname: TargetDown, exp_alerts: []}
+      - {eval_time: 15m, alertname: ApiMemoryHigh, exp_alerts: []}
+      - {eval_time: 15m, alertname: ApiHighErrorRate, exp_alerts: []}
+      - {eval_time: 15m, alertname: ApiSlowPredictions, exp_alerts: []}
+      - {eval_time: 15m, alertname: HighRejectionRate, exp_alerts: []}
+      - {eval_time: 15m, alertname: AccelerationDrift, exp_alerts: []}
+      - {eval_time: 15m, alertname: RotationDrift, exp_alerts: []}
+      - {eval_time: 15m, alertname: MissingValuesDrift, exp_alerts: []}
+      - {eval_time: 15m, alertname: ShortRides, exp_alerts: []}
+      - {eval_time: 15m, alertname: ModelNotLoaded, exp_alerts: []}
+      - {eval_time: 15m, alertname: PredictionDistributionDrift, exp_alerts: []}
+      - {eval_time: 15m, alertname: LowPredictionConfidence, exp_alerts: []}
