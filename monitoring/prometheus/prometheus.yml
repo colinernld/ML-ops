@@ -1,0 +1,60 @@
+# Prometheus for the dev stack (Docker Compose, profile "monitoring"):
+#   docker compose --profile monitoring up -d     → http://localhost:9090 (Grafana: http://localhost:3000)
+# Production (Kubernetes) uses prometheus-k8s.yml: same jobs, but the API pods are discovered automatically.
+# Checked by CI: promtool check config. See docs/monitoring.md.
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+  external_labels:
+    environment: dev
+
+rule_files:
+  - /etc/prometheus/alerts.yml
+
+scrape_configs:
+  # Service, input data and model output layers: the API's own metrics (src/api/monitoring.py).
+  # API started with uvicorn on your laptop instead of the container? Use host.docker.internal:8000.
+  - job_name: ride-api
+    static_configs:
+      - targets: ["api:8000"]
+
+  # Infrastructure layer: every service answers its health check (blackbox exporter, monitoring/blackbox/).
+  - job_name: health-checks
+    metrics_path: /probe
+    params:
+      module: [http_2xx]
+    static_configs:
+      - targets: ["http://api:8000/ready"]
+        labels: {service: api}
+      - targets: ["http://webapp:8501/_stcore/health"]
+        labels: {service: webapp}
+      - targets: ["http://mlflow:5000/health"]
+        labels: {service: mlflow}
+      - targets: ["http://minio:9000/minio/health/live"]
+        labels: {service: minio}
+    relabel_configs:
+      - source_labels: [__address__]
+        target_label: __param_target
+      - source_labels: [__param_target]
+        target_label: instance
+      - target_label: __address__
+        replacement: blackbox:9115
+
+  - job_name: health-checks-tcp
+    metrics_path: /probe
+    params:
+      module: [tcp_connect]
+    static_configs:
+      - targets: ["postgres:5432"]
+        labels: {service: postgres}
+    relabel_configs:
+      - source_labels: [__address__]
+        target_label: __param_target
+      - source_labels: [__param_target]
+        target_label: instance
+      - target_label: __address__
+        replacement: blackbox:9115
+
+  - job_name: prometheus
+    static_configs:
+      - targets: ["localhost:9090"]

@@ -1,0 +1,28 @@
+# Monitoring stack for production (Kubernetes): Prometheus + alert rules, Grafana + dashboard, blackbox
+# exporter. Included by k8s/kustomization.yaml, so `kubectl apply -k k8s/` (and the CD workflow) deploys it.
+# The ConfigMaps are generated from the same files the Compose dev stack mounts: one source of truth.
+# A hash is appended to each ConfigMap name, so editing a file restarts the pods that use it.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: ride-mlops
+resources:
+  - k8s/prometheus.yaml
+  - k8s/grafana.yaml
+  - k8s/blackbox.yaml
+configMapGenerator:
+  - name: prometheus-config
+    files:
+      - prometheus.yml=prometheus/prometheus-k8s.yml
+      - alerts.yml=prometheus/alerts.yml
+  - name: blackbox-config
+    files:
+      - blackbox.yml=blackbox/blackbox.yml
+  - name: grafana-datasources
+    files:
+      - prometheus.yml=grafana/provisioning/datasources/prometheus.yml
+  - name: grafana-dashboard-providers
+    files:
+      - dashboards.yml=grafana/provisioning/dashboards/dashboards.yml
+  - name: grafana-dashboards
+    files:
+      - ride-api.json=grafana/dashboards/ride-api.json

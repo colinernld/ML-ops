@@ -4,7 +4,7 @@
 # Triggers:
 # - the `docker-images` workflow finished successfully on main → deploy the images of that commit
 #   (tag sha-<commit>, immutable, so every deployment can be traced and rolled back);
-# - a push to main that only changes k8s/ → re-apply the manifests, keep the images already running;
+# - a push to main that only changes k8s/ or monitoring/ → re-apply the manifests, keep the images running;
 # - manual run (Actions → cd → Run workflow) with an image tag, e.g. to roll back to an older sha-xxxxxxx.
 #
 # Never runs on pull requests: code from a PR must not execute on the production machine.
@@ -18,7 +18,7 @@ on:
     branches: [main]
   push:
     branches: [main]
-    paths: ["k8s/**"]
+    paths: ["k8s/**", "monitoring/**"]
   workflow_dispatch:
     inputs:
       tag:
@@ -138,6 +138,16 @@ jobs:
           curl -fsS http://localhost:30851/_stcore/health && echo " ← web app"
           curl -fsS -F "file=@examples/ride_safe.csv" http://localhost:30800/predict/file && echo " ← prediction"
 
+      # Monitoring problems are reported but never block or roll back the application.
+      - name: Monitoring rollout (Prometheus, Grafana)
+        continue-on-error: true
+        run: |
+          for d in blackbox prometheus grafana; do
+            kubectl --context "$KUBE_CONTEXT" -n "$K8S_NAMESPACE" rollout status "deployment/$d" --timeout=3m
+          done
+          curl -fsS http://localhost:30909/-/ready && echo " ← Prometheus"
+          curl -fsS http://localhost:30300/api/health && echo " ← Grafana"
+
       # Only if the new images were actually set: a failure before that left production untouched.
       - name: Roll back on failure
         if: failure() && steps.set-images.outcome == 'success'
@@ -158,6 +168,8 @@ jobs:
             echo "| Web app | http://localhost:30851 |"
             echo "| MLflow | http://localhost:30550 |"
             echo "| MinIO console | http://localhost:30901 |"
+            echo "| Grafana (monitoring) | http://localhost:30300 |"
+            echo "| Prometheus (alerts) | http://localhost:30909/alerts |"
             echo
             echo '```'
             kubectl --context "$KUBE_CONTEXT" -n "$K8S_NAMESPACE" get deploy -o wide

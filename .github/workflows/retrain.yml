@@ -1,0 +1,112 @@
+# Retraining pipeline in production: get the data → validate it → retrain → register a new version in
+# MLflow → promote it to @production only if it is better → redeploy (the API restarts on the new model).
+#
+# Runs on the self-hosted runner of the production Mac (the data and the Kubernetes cluster are there), as a
+# Kubernetes Job (k8s/train-in-cluster.sh) with the same steps as the Airflow DAG (src/trajclf/pipeline.py).
+# Triggers:
+#   - manual: Actions → retrain → Run workflow (e.g. after a drift alert in Grafana, docs/monitoring.md);
+#   - weekly, Monday 04:00 UTC, only if the repository variable RETRAIN_ON_SCHEDULE is "true";
+#   - API event `repository_dispatch` of type "retrain" (e.g. from an alert webhook).
+# Setup (once): repository variable RAW_DATA_DIR = folder of the production Mac that holds
+# GBG500.parquet and GBG500_labels.csv (docs/cicd.md).
+name: retrain
+
+on:
+  workflow_dispatch:
+    inputs:
+      pause_api:
+        description: "Stop the API while training (needed on an 8 GB Mac, causes a few minutes of downtime)"
+        type: boolean
+        default: false
+  schedule:
+    - cron: "0 4 * * 1"
+  repository_dispatch:
+    types: [retrain]
+
+concurrency:
+  group: cd-production   # same group as cd.yml: never retrain during a deployment, and vice versa
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+env:
+  KUBE_CONTEXT: docker-desktop
+  K8S_NAMESPACE: ride-mlops
+  API_URL: http://localhost:30800
+
+jobs:
+  retrain:
+    if: >-
+      github.repository == 'colinernld/ML-ops' &&
+      (github.event_name != 'schedule' || vars.RETRAIN_ON_SCHEDULE == 'true')
+    runs-on: [self-hosted, macOS]
+    timeout-minutes: 60
+    environment:
+      name: production
+      url: http://localhost:30550/#/models/ride-classifier
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Tools in PATH
+        run: |
+          {
+            echo "$HOME/.docker/bin"
+            echo "/usr/local/bin"
+            echo "/opt/homebrew/bin"
+          } >> "$GITHUB_PATH"
+
+      - name: Get the data
+        env:
+          RAW_DATA_DIR: ${{ vars.RAW_DATA_DIR }}
+        run: |
+          if [ -z "$RAW_DATA_DIR" ]; then
+            echo "::error::Set the repository variable RAW_DATA_DIR: folder with GBG500.parquet and GBG500_labels.csv on the production Mac"
+            exit 1
+          fi
+          ls -l "$RAW_DATA_DIR/GBG500.parquet" "$RAW_DATA_DIR/GBG500_labels.csv"
+          kubectl --context "$KUBE_CONTEXT" -n "$K8S_NAMESPACE" get deploy mlflow api
+
+      - name: Model in production before retraining
+        id: before
+        run: |
+          version=$(curl -fsS "$API_URL/model" | sed -n 's/.*"version":"\([^"]*\)".*/\1/p' || true)
+          echo "version=${version:-none}" >> "$GITHUB_OUTPUT"
+          echo "Serving v${version:-none}"
+
+      - name: Pause the API (frees memory for training)
+        if: inputs.pause_api
+        run: kubectl --context "$KUBE_CONTEXT" -n "$K8S_NAMESPACE" scale deployment/api --replicas=0
+
+      # Validates the data (stops on bad data), trains, registers the new version, promotes it only if it
+      # beats the baselines and the current production model, then restarts the API.
+      - name: Validate, train, register, promote if better (Kubernetes Job)
+        env:
+          RAW_DATA_DIR: ${{ vars.RAW_DATA_DIR }}
+        run: ./k8s/train-in-cluster.sh "$RAW_DATA_DIR"
+
+      - name: Restart the API
+        if: always() && inputs.pause_api
+        run: |
+          kubectl --context "$KUBE_CONTEXT" -n "$K8S_NAMESPACE" scale deployment/api --replicas=1
+          kubectl --context "$KUBE_CONTEXT" -n "$K8S_NAMESPACE" rollout status deployment/api --timeout=6m
+
+      - name: Smoke test and summary
+        env:
+          BEFORE: ${{ steps.before.outputs.version }}
+        run: |
+          curl -fsS "$API_URL/ready"
+          after=$(curl -fsS "$API_URL/model" | sed -n 's/.*"version":"\([^"]*\)".*/\1/p')
+          curl -fsS -F "file=@examples/ride_safe.csv" "$API_URL/predict/file"
+          if [ "$after" = "$BEFORE" ]; then
+            result="Not promoted: the new version was not better, production stays on v$after (see the 'promotion' tag in MLflow)"
+          else
+            result="Promoted: production moved from v$BEFORE to v$after"
+          fi
+          echo "$result"
+          {
+            echo "### Retraining"
+            echo "$result"
+            echo
+            echo "MLflow: http://localhost:30550 · Grafana: http://localhost:30300"
+          } >> "$GITHUB_STEP_SUMMARY"

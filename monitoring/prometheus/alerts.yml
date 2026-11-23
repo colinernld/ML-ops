@@ -1,0 +1,174 @@
+# Alert rules, one group per monitoring layer (docs/monitoring.md):
+#   1 infrastructure · 2 service · 3 input data · 4 model
+# Thresholds come from the training data (docs/data.md) and the demo rides (examples/):
+#   mean |a| per ride ≈ 9.5 m/s² (gravity included), mean |r| per ride 16 – 40 °/s, rides of 3 – 8 min
+#   (1,800 – 4,800 samples), < 1 % missing values, ≈ 83 % of rides "Safe".
+# Data and model windows are short (5 min) so a drift can be shown live during the demo; on real traffic
+# use 1 h – 1 day windows.
+# Unit tests (run by CI): promtool test rules monitoring/prometheus/alerts_test.yml
+groups:
+  - name: infrastructure
+    rules:
+      - alert: ServiceDown
+        expr: probe_success == 0
+        for: 2m
+        labels:
+          severity: critical
+          layer: infrastructure
+        annotations:
+          summary: "{{ $labels.service }} does not answer its health check"
+          description: "Health check {{ $labels.instance }} has been failing for 2 minutes."
+
+      - alert: TargetDown
+        expr: up == 0
+        for: 2m
+        labels:
+          severity: critical
+          layer: infrastructure
+        annotations:
+          summary: "Prometheus cannot scrape {{ $labels.job }}"
+          description: "Target {{ $labels.instance }} does not answer: the container or pod is down."
+
+      - alert: ApiMemoryHigh
+        expr: process_resident_memory_bytes{job="ride-api"} > 1200000000
+        for: 5m
+        labels:
+          severity: warning
+          layer: infrastructure
+        annotations:
+          summary: "The API uses more than 1.2 GB of memory"
+          description: "{{ $labels.instance }} is close to its 1.5 GiB Kubernetes limit (risk of OOMKilled)."
+
+  - name: service
+    rules:
+      - alert: ApiHighErrorRate
+        expr: |
+          sum(rate(api_requests_total{path=~"/predict.*", status=~"5.."}[5m]))
+            / sum(rate(api_requests_total{path=~"/predict.*"}[5m])) > 0.05
+        for: 2m
+        labels:
+          severity: critical
+          layer: service
+        annotations:
+          summary: "More than 5 % of prediction requests fail (HTTP 5xx)"
+          description: "Usually no model is loaded (HTTP 503): check GET /ready and the @production alias in MLflow."
+
+      - alert: ApiSlowPredictions
+        expr: |
+          histogram_quantile(0.95,
+            sum by (le) (rate(api_request_duration_seconds_bucket{path=~"/predict.*"}[5m]))) > 2
+        for: 5m
+        labels:
+          severity: warning
+          layer: service
+        annotations:
+          summary: "95 % of predictions should take less than 2 s"
+          description: "Predictions are slow: CPU saturated or very long rides. Check the API CPU or add replicas."
+
+  - name: data
+    rules:
+      - alert: HighRejectionRate
+        expr: |
+          sum(rate(prediction_errors_total{reason=~"validation|bad_file|file_too_large"}[5m]))
+            / sum(rate(api_requests_total{path=~"/predict.*"}[5m])) > 0.2
+        for: 2m
+        labels:
+          severity: warning
+          layer: data
+        annotations:
+          summary: "More than 20 % of the rides sent are rejected (HTTP 413/422)"
+          description: "A client sends invalid rides: see prediction_errors_total by reason and the API logs."
+
+      - alert: AccelerationDrift
+        expr: |
+          abs(sum(rate(ride_acc_magnitude_mean_sum[5m])) / sum(rate(ride_acc_magnitude_mean_count[5m])) - 9.5) > 1.5
+          and sum(increase(ride_acc_magnitude_mean_count[5m])) >= 10
+        for: 2m
+        labels:
+          severity: warning
+          layer: data
+        annotations:
+          summary: "Mean acceleration of the rides is far from 9.5 m/s² (training data)"
+          description: "Accelerometer sent in g instead of m/s², or without gravity: predictions are unreliable."
+
+      - alert: RotationDrift
+        expr: |
+          (
+            sum(rate(ride_rot_magnitude_mean_sum[5m])) / sum(rate(ride_rot_magnitude_mean_count[5m])) > 35
+            or
+            sum(rate(ride_rot_magnitude_mean_sum[5m])) / sum(rate(ride_rot_magnitude_mean_count[5m])) < 3
+          )
+          and sum(increase(ride_rot_magnitude_mean_count[5m])) >= 10
+        for: 2m
+        labels:
+          severity: warning
+          layer: data
+        annotations:
+          summary: "Mean rotation of the rides is outside 3 – 35 °/s (training data: 16 – 40 °/s per ride)"
+          description: "Gyroscope in rad/s instead of °/s, new phones or a new riding population: consider retraining."
+
+      - alert: MissingValuesDrift
+        expr: |
+          sum(rate(ride_missing_ratio_sum[5m])) / sum(rate(ride_missing_ratio_count[5m])) > 0.05
+          and sum(increase(ride_missing_ratio_count[5m])) >= 10
+        for: 2m
+        labels:
+          severity: warning
+          layer: data
+        annotations:
+          summary: "Rides have more than 5 % missing sensor values (training data: 0.7 %)"
+          description: "Missing values are interpolated before scoring: many of them make predictions unreliable."
+
+      - alert: ShortRides
+        expr: |
+          sum(rate(ride_samples_sum[5m])) / sum(rate(ride_samples_count[5m])) < 600
+          and sum(increase(ride_samples_count[5m])) >= 10
+        for: 2m
+        labels:
+          severity: warning
+          layer: data
+        annotations:
+          summary: "Rides are shorter than 1 minute on average (training data: 3 – 8 minutes)"
+          description: "The model scores 25.6 s windows: very short rides give few windows and unreliable predictions."
+
+  - name: model
+    rules:
+      - alert: ModelNotLoaded
+        expr: model_loaded == 0
+        for: 2m
+        labels:
+          severity: critical
+          layer: model
+        annotations:
+          summary: "The API has no model to serve"
+          description: "{{ $labels.instance }} could not load models:/ride-classifier@production: is a version promoted?"
+
+      - alert: PredictionDistributionDrift
+        expr: |
+          (
+            (sum(increase(predictions_total{label="Safe"}[5m])) or vector(0))
+              / sum(increase(predictions_total[5m])) < 0.5
+            or
+            (sum(increase(predictions_total{label="Safe"}[5m])) or vector(0))
+              / sum(increase(predictions_total[5m])) > 0.97
+          )
+          and sum(increase(predictions_total[5m])) >= 20
+        for: 2m
+        labels:
+          severity: warning
+          layer: model
+        annotations:
+          summary: "Share of rides predicted Safe is outside 50 – 97 % (expected ≈ 83 %)"
+          description: "Output drift: the inputs changed, or the model collapsed to a single class. Check the input panels."
+
+      - alert: LowPredictionConfidence
+        expr: |
+          sum(rate(prediction_confidence_sum[5m])) / sum(rate(prediction_confidence_count[5m])) < 0.35
+          and sum(increase(prediction_confidence_count[5m])) >= 20
+        for: 2m
+        labels:
+          severity: warning
+          layer: model
+        annotations:
+          summary: "Mean confidence of the predictions is below 35 %"
+          description: "The model hesitates between classes: rides unlike the training data. Check the input panels."

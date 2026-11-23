@@ -20,5 +20,6 @@ kubectl -n "$NAMESPACE" create secret generic ride-secrets \
   --from-literal=POSTGRES_USER="$(get POSTGRES_USER)" \
   --from-literal=POSTGRES_PASSWORD="$(get POSTGRES_PASSWORD)" \
   --from-literal=RELOAD_TOKEN="$(get RELOAD_TOKEN)" \
+  --from-literal=GRAFANA_ADMIN_PASSWORD="$(get GRAFANA_ADMIN_PASSWORD)" \
   --dry-run=client -o yaml | kubectl apply -f -
 echo "Secret ride-secrets ready in namespace $NAMESPACE"

@@ -3,6 +3,7 @@
 #   cp .env.example .env        # once, then change the passwords
 #   docker compose up -d        # MLflow UI: http://localhost:5050   MinIO console: http://localhost:9001
 #                               # API: http://localhost:8000/docs     Web app: http://localhost:8501
+#   docker compose --profile monitoring up -d   # + Prometheus http://localhost:9090, Grafana http://localhost:3000
 #   docker compose down         # stop (data is kept in Docker volumes; add -v to wipe it)
 #
 # Clients (training, API) only need MLFLOW_TRACKING_URI: the server proxies artifact uploads and
@@ -159,6 +160,57 @@ services:
       start_period: 60s
     restart: unless-stopped
 
+  # Monitoring (optional): Prometheus http://localhost:9090, Grafana http://localhost:3000.
+  #   docker compose --profile monitoring up -d          (see docs/monitoring.md)
+  # Same config files as production (monitoring/), Kubernetes only swaps prometheus.yml for prometheus-k8s.yml.
+  prometheus:
+    profiles: ["monitoring"]
+    image: prom/prometheus:v3.15.1
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+      - --storage.tsdb.retention.time=7d
+    volumes:
+      - ./monitoring/prometheus:/etc/prometheus:ro
+      - prometheus-data:/prometheus
+    ports:
+      - "127.0.0.1:${PROMETHEUS_PORT:-9090}:9090"
+    restart: unless-stopped
+
+  # Calls the health check of every service for Prometheus (infrastructure layer).
+  blackbox:
+    profiles: ["monitoring"]
+    image: prom/blackbox-exporter:v0.29.1
+    command: ["--config.file=/etc/blackbox/blackbox.yml"]
+    volumes:
+      - ./monitoring/blackbox:/etc/blackbox:ro
+    restart: unless-stopped
+
+  grafana:
+    profiles: ["monitoring"]
+    image: grafana/grafana:12.4.15
+    depends_on: [prometheus]
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-admin}
+      # Dev only: the dashboard opens without login (read-only); log in as admin to edit.
+      GF_AUTH_ANONYMOUS_ENABLED: "true"
+      GF_AUTH_ANONYMOUS_ORG_ROLE: Viewer
+      GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH: /etc/grafana/dashboards/ride-api.json
+      GF_ANALYTICS_REPORTING_ENABLED: "false"
+      GF_ANALYTICS_CHECK_FOR_UPDATES: "false"
+      GF_PLUGINS_PREINSTALL_DISABLED: "true"
+    volumes:
+      - ./monitoring/grafana/provisioning/datasources:/etc/grafana/provisioning/datasources:ro
+      - ./monitoring/grafana/provisioning/dashboards:/etc/grafana/provisioning/dashboards:ro
+      - ./monitoring/grafana/dashboards:/etc/grafana/dashboards:ro
+      - grafana-data:/var/lib/grafana
+    ports:
+      - "127.0.0.1:${GRAFANA_PORT:-3000}:3000"
+    restart: unless-stopped
+
 volumes:
   minio-data:
   postgres-data:
+  prometheus-data:
+  grafana-data:

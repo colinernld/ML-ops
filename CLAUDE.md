@@ -20,7 +20,7 @@ Reckless**, with a full MLOps pipeline around it. Data: `Project.zip` on Inside 
   4 track experiments and model versions with MLflow · 5 prediction API · 6 Dockerize the API and deploy
   it on Kubernetes with GitHub Actions CI/CD (self-hosted runner) · 7 version and document on GitHub.
 - **Bonus**: retraining pipeline in GitHub Actions (get data → retrain → redeploy) · monitoring
-  (Prometheus + Grafana, ELK, ...) · feature store.
+  (Prometheus + Grafana, ELK, ...) · feature store. Done: retraining and monitoring; feature store not done.
 - **Repo must contain**: all code (preprocessing, training, API, interactive web app, optional monitoring),
   pipeline/workflow DAGs (Airflow or other), GitHub Actions CI/CD, tests (unit, integration, end-to-end),
   documentation, a README with technical choices, results and screenshots of the production environment,
@@ -36,9 +36,11 @@ Reckless**, with a full MLOps pipeline around it. Data: `Project.zip` on Inside 
 | Data + model | done | `src/trajclf/`, [docs/data.md](docs/data.md), [docs/model_card.md](docs/model_card.md) |
 | MLflow + MinIO | done | `docker-compose.yml`, `docker/mlflow/`, `src/trajclf/promote.py`, [docs/mlflow.md](docs/mlflow.md) |
 | API (FastAPI) + web app (Streamlit) | done | `src/api/`, `webapp/`, [docs/api.md](docs/api.md) |
-| Docker + Kubernetes + CI/CD | to do | `docker/`, `k8s/`, `.github/workflows/` |
+| Docker + Kubernetes + CI/CD | done | `docker/`, `k8s/`, `.github/workflows/`, [docs/docker.md](docs/docker.md), [docs/kubernetes.md](docs/kubernetes.md), [docs/cicd.md](docs/cicd.md) |
 | Training pipeline (Airflow DAG) | done (Airflow image: first build on Docker Desktop to confirm) | `dags/`, `src/trajclf/pipeline.py`, `docker/airflow/`, [docs/pipeline.md](docs/pipeline.md) |
-| Monitoring + README + slides | to do | `monitoring/`, `README.md` |
+| Retraining in production (GitHub Actions) | done, to run once on the production Mac (needs the `RAW_DATA_DIR` variable) | `.github/workflows/retrain.yml`, [docs/cicd.md](docs/cicd.md#retraining-workflow) |
+| Monitoring (Prometheus + Grafana) | done; production screenshots to take | `monitoring/`, `scripts/simulate_traffic.py`, [docs/monitoring.md](docs/monitoring.md) |
+| README + slides | done | `README.md`, slides shared in the group |
 
 ## Interfaces to build on
 
@@ -66,8 +68,12 @@ Reckless**, with a full MLOps pipeline around it. Data: `Project.zip` on Inside 
   Actions retraining job). Details in [docs/pipeline.md](docs/pipeline.md).
 - **Web app**: `API_URL=http://localhost:8000 streamlit run webapp/app.py` (port 8501). Calls the API only: its
   image needs no PyTorch.
-- **Monitoring ideas**: end of [docs/model_card.md](docs/model_card.md); metrics already exposed are listed in
-  [docs/api.md](docs/api.md#metrics-for-monitoring-get-metrics).
+- **Monitoring** ([docs/monitoring.md](docs/monitoring.md)): `docker compose --profile monitoring up -d` → Grafana
+  <http://localhost:3000>, Prometheus <http://localhost:9090>; production Grafana <http://localhost:30300>, Prometheus
+  <http://localhost:30909>. A new API metric must be added to `src/api/monitoring.py`; dashboard and alerts may only
+  use exposed metrics (`tests/test_monitoring.py`). Alert rules have unit tests (`promtool test rules`, run by CI).
+  Demo traffic / drift: `python scripts/simulate_traffic.py [--api URL] [--drift units|rotation|missing|short|invalid]`.
+- **Retraining in production**: Actions → *retrain* (self-hosted runner, `k8s/train-in-cluster.sh`), promotes only if better.
 
 ## Gotchas
 
@@ -81,10 +87,11 @@ Reckless**, with a full MLOps pipeline around it. Data: `Project.zip` on Inside 
 Tracked as GitHub issues (details and "done when" checklists there). Assign yourself on the issue, link
 it from your PR with `Closes #N`, and remove the line here once it is merged.
 
-- [#4](https://github.com/colinernld/ML-ops/issues/4) **MLflow, MinIO and Postgres must also run on
-  Kubernetes** (production). Docker + K8s part.
-- [#5](https://github.com/colinernld/ML-ops/issues/5) **Push our images to Docker Hub** (API, web app,
-  MLflow server) and list the URLs in the README. Needs a team Docker Hub account.
+- [#4](https://github.com/colinernld/ML-ops/issues/4) (MLflow, MinIO, Postgres on Kubernetes) and
+  [#5](https://github.com/colinernld/ML-ops/issues/5) (images on Docker Hub, URLs in the README) were done in
+  #12 – #14: close the issues after checking their "done when" lists.
+- **Before the deadline**: screenshots of production (Grafana dashboard, Prometheus alerts, `kubectl get pods`,
+  Actions runs) in `docs/figures/`, linked from the README and docs/monitoring.md.
 - [#7](https://github.com/colinernld/ML-ops/issues/7) **Results differ by environment** (5-fold CV with
   torch 2.14.1: balanced accuracy 0.36, macro-F1 0.31 vs 0.44 / 0.36 in the README, still above the
   baselines) and **both example rides are predicted "Safe overall"**: keep in mind for the API demo.
