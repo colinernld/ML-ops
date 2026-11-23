@@ -1,0 +1,95 @@
+# Prometheus: scrapes the API pods (found through their prometheus.io/* annotations) and the blackbox
+# health checks, and evaluates the alert rules. UI on http://localhost:30909 (Alerts tab).
+# Config + rules come from the ConfigMap `prometheus-config` (monitoring/kustomization.yaml).
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: prometheus
+  labels: {app.kubernetes.io/name: prometheus}
+---
+# Read-only access to the pods of this namespace only: enough for the pod discovery of the API.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: prometheus
+  labels: {app.kubernetes.io/name: prometheus}
+rules:
+  - apiGroups: [""]
+    resources: [pods]
+    verbs: [get, list, watch]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: prometheus
+  labels: {app.kubernetes.io/name: prometheus}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: prometheus
+subjects:
+  - kind: ServiceAccount
+    name: prometheus
+    namespace: ride-mlops
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: prometheus
+  labels: {app.kubernetes.io/name: prometheus}
+spec:
+  replicas: 1
+  selector:
+    matchLabels: {app.kubernetes.io/name: prometheus}
+  template:
+    metadata:
+      labels: {app.kubernetes.io/name: prometheus}
+    spec:
+      serviceAccountName: prometheus
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65534
+        runAsGroup: 65534
+      containers:
+        - name: prometheus
+          image: prom/prometheus:v3.15.1
+          args:
+            - --config.file=/etc/prometheus/prometheus.yml
+            - --storage.tsdb.path=/prometheus
+            - --storage.tsdb.retention.time=7d
+            - --storage.tsdb.retention.size=800MB
+          ports:
+            - {name: http, containerPort: 9090}
+          securityContext:
+            allowPrivilegeEscalation: false
+          readinessProbe:
+            httpGet: {path: /-/ready, port: http}
+            periodSeconds: 10
+          livenessProbe:
+            httpGet: {path: /-/healthy, port: http}
+            periodSeconds: 20
+            failureThreshold: 5
+          resources:
+            requests: {cpu: 50m, memory: 192Mi}
+            limits: {memory: 512Mi}
+          volumeMounts:
+            - {name: config, mountPath: /etc/prometheus, readOnly: true}
+            - {name: data, mountPath: /prometheus}
+      volumes:
+        - name: config
+          configMap: {name: prometheus-config}
+        # Metrics history is kept while the pod lives (7 days max). Enough for a laptop cluster; a real
+        # production setup would use a PersistentVolumeClaim (or the kube-prometheus-stack Helm chart).
+        - name: data
+          emptyDir: {sizeLimit: 1Gi}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: prometheus
+  labels: {app.kubernetes.io/name: prometheus}
+spec:
+  type: NodePort
+  selector: {app.kubernetes.io/name: prometheus}
+  ports:
+    - {name: http, port: 9090, targetPort: http, nodePort: 30909}

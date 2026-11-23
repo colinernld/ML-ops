@@ -1,0 +1,50 @@
+# Blackbox exporter: calls the health check of each service (MLflow, MinIO, Postgres, API, web app) when
+# Prometheus asks, so the infrastructure layer covers services that expose no metrics themselves.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: blackbox
+  labels: {app.kubernetes.io/name: blackbox}
+spec:
+  replicas: 1
+  selector:
+    matchLabels: {app.kubernetes.io/name: blackbox}
+  template:
+    metadata:
+      labels: {app.kubernetes.io/name: blackbox}
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65534
+      containers:
+        - name: blackbox
+          image: prom/blackbox-exporter:v0.29.1
+          args: ["--config.file=/etc/blackbox/blackbox.yml"]
+          ports:
+            - {name: http, containerPort: 9115}
+          securityContext:
+            allowPrivilegeEscalation: false
+          readinessProbe:
+            httpGet: {path: /-/healthy, port: http}
+            periodSeconds: 10
+          livenessProbe:
+            httpGet: {path: /-/healthy, port: http}
+            periodSeconds: 20
+          resources:
+            requests: {cpu: 10m, memory: 32Mi}
+            limits: {memory: 64Mi}
+          volumeMounts:
+            - {name: config, mountPath: /etc/blackbox, readOnly: true}
+      volumes:
+        - name: config
+          configMap: {name: blackbox-config}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: blackbox
+  labels: {app.kubernetes.io/name: blackbox}
+spec:
+  selector: {app.kubernetes.io/name: blackbox}
+  ports:
+    - {name: http, port: 9115, targetPort: http}
