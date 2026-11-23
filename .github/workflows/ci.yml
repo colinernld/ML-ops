@@ -69,3 +69,35 @@ jobs:
             | tar xz -C /usr/local/bin kubeconform
           kubectl kustomize k8s > rendered.yaml
           kubeconform -strict -summary -kubernetes-version 1.34.0 rendered.yaml
+
+  monitoring:
+    name: monitoring (Prometheus, alert rules, Compose)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      PROMETHEUS_IMAGE: prom/prometheus:v3.15.1      # same versions as docker-compose.yml and monitoring/k8s/
+      BLACKBOX_IMAGE: prom/blackbox-exporter:v0.29.1
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Prometheus configs, dev and production (promtool check config)
+        run: |
+          for f in prometheus.yml prometheus-k8s.yml; do
+            docker run --rm -v "$PWD/monitoring/prometheus:/etc/prometheus:ro" --entrypoint promtool \
+              "$PROMETHEUS_IMAGE" check config "/etc/prometheus/$f"
+          done
+
+      - name: Alert rules unit tests (promtool test rules)
+        run: |
+          docker run --rm -v "$PWD/monitoring/prometheus:/etc/prometheus:ro" -w /etc/prometheus \
+            --entrypoint promtool "$PROMETHEUS_IMAGE" test rules alerts_test.yml
+
+      - name: Blackbox exporter config
+        run: |
+          docker run --rm -v "$PWD/monitoring/blackbox:/etc/blackbox:ro" "$BLACKBOX_IMAGE" \
+            --config.file=/etc/blackbox/blackbox.yml --config.check
+
+      - name: Docker Compose file, every profile (docker compose config)
+        run: |
+          cp .env.example .env
+          docker compose --profile airflow --profile monitoring config --quiet
