@@ -82,6 +82,8 @@ HTTP 422 with the reason.
 
 ## Metrics for monitoring (`GET /metrics`)
 
+Collected by Prometheus and shown in Grafana, with alert rules on each layer: see [monitoring.md](monitoring.md).
+
 | Layer | Metric | Use |
 |---|---|---|
 | Service | `api_requests_total{method,path,status}`, `api_request_duration_seconds` | traffic, error rate, latency |

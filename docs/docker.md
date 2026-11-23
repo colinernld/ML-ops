@@ -56,6 +56,13 @@ docker compose up -d --build     # builds api + webapp locally the first time (a
 | Web app | http://localhost:8501 |
 | MLflow | http://localhost:5050 |
 | MinIO console | http://localhost:9001 |
+| Grafana (`--profile monitoring`) | http://localhost:3000 |
+| Prometheus (`--profile monitoring`) | http://localhost:9090 |
+| Airflow (`--profile airflow`) | http://localhost:8080 |
+
+Optional services are behind Compose profiles: `docker compose --profile monitoring up -d` adds Prometheus,
+Grafana and the blackbox exporter (official images, configuration mounted from `monitoring/`, see
+[monitoring.md](monitoring.md)).
 
 The API starts even before a model is promoted: `/health` answers 200, `/ready` answers 503 until
 `python -m trajclf.promote` has set `@production`, then `POST /model/reload` (or restart the container).

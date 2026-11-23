@@ -63,9 +63,15 @@ python -m trajclf.pipeline promote          # one step; exit code 99 = productio
 | DAG structure (dependencies, skip on "not promoted", one step per task) | `pytest tests/test_airflow_dag.py` (runs where Airflow is installed) |
 | Full DAG with Airflow 3.4 against a live MLflow server and the live API | `airflow dags test ride_classifier_training -c '{"epochs": 2}'`: run 1 promoted v1 and the API reloaded it; run 2 (worse model) skipped `promote` and `reload_api`, API stayed on v1 |
 
-## For Kubernetes
+## In production: GitHub Actions
 
-In production the same image runs in the cluster (official Airflow Helm chart or a single `airflow standalone`
+In production the same steps run from the `retrain` GitHub Actions workflow on the self-hosted runner, as a
+Kubernetes Job (`k8s/train-in-cluster.sh`): manually, weekly, or when a drift is detected. See
+[cicd.md](cicd.md#retraining-workflow) and the drift alerts in [monitoring.md](monitoring.md).
+
+## Airflow on Kubernetes (not deployed)
+
+Airflow could also run in the cluster (official Airflow Helm chart or a single `airflow standalone`
 Deployment), with `MLFLOW_TRACKING_URI` and `API_URL` pointing at the MLflow and API Services, and `RELOAD_TOKEN`
 from the same Secret as the API. The raw data must be on a volume mounted at `/opt/project/data/raw`.
 

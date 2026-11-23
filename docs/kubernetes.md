@@ -11,11 +11,18 @@ Production = **all** services on the local Kubernetes cluster of Docker Desktop,
 | MLflow server + registry | Deployment | — | http://localhost:30550 |
 | API (FastAPI) | Deployment | — | http://localhost:30800/docs |
 | Web app (Streamlit) | Deployment | — | http://localhost:30851 |
+| Prometheus (metrics, alerts) | Deployment | `emptyDir`, 7 days | http://localhost:30909 |
+| Grafana (dashboard) | Deployment | — (provisioned) | http://localhost:30300 |
+| Blackbox exporter (health checks) | Deployment | — | in-cluster only |
 
 ```
 browser ──► webapp :30851 ──► api :30800 ──► mlflow :30550 ──► postgres
-                                                              └──────► minio (bucket "mlflow")
+                                │                             └──────► minio (bucket "mlflow")
+                                └── /metrics ◀── prometheus :30909 ◀── grafana :30300
 ```
+
+Monitoring manifests live in [`monitoring/`](../monitoring) (included by `k8s/kustomization.yaml`), see
+[monitoring.md](monitoring.md).
 
 - Images come from Docker Hub (built by GitHub Actions, see [docker.md](docker.md)): nothing is built on the Mac.
 - Passwords live in the Secret `ride-secrets`, created from your `.env` by `k8s/create-secrets.sh`, never in git.
@@ -69,7 +76,8 @@ Alternative from the laptop (needs `pip install -e ".[mlflow]"` and the data in 
 then `python -m trajclf.promote` and `kubectl -n ride-mlops rollout restart deployment/api`.
 
 **4. Check**: http://localhost:30851 (web app), http://localhost:30800/docs (Swagger),
-http://localhost:30550 (MLflow, model `ride-classifier` with alias `production`).
+http://localhost:30550 (MLflow, model `ride-classifier` with alias `production`),
+http://localhost:30300 (Grafana dashboard; send traffic with `python scripts/simulate_traffic.py --api http://localhost:30800`).
 
 ```bash
 curl -F "file=@examples/ride_safe.csv" http://localhost:30800/predict/file
