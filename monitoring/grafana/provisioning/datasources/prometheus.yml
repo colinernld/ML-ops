@@ -1,1 +1,13 @@
-# placeholder
+# Grafana data source, provisioned at startup (Compose and Kubernetes: the Prometheus service is
+# reachable as http://prometheus:9090 in both). The fixed uid is what the dashboard panels refer to.
+apiVersion: 1
+datasources:
+  - name: Prometheus
+    uid: prometheus
+    type: prometheus
+    access: proxy
+    url: http://prometheus:9090
+    isDefault: true
+    editable: false
+    jsonData:
+      timeInterval: 15s   # = scrape_interval, so $__rate_interval is computed correctly
