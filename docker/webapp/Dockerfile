@@ -14,7 +14,9 @@ RUN pip install "streamlit>=1.50,<2" "requests>=2.32" "pandas>=2.1"
 COPY webapp/ webapp/
 COPY examples/ examples/
 
-RUN useradd --create-home --uid 10001 app
+# Readable by the non-root user whatever the permissions on the build machine.
+RUN chmod -R a+rX /app/webapp /app/examples \
+    && useradd --create-home --uid 10001 app
 USER 10001
 
 ENV API_URL=http://api:8000 \

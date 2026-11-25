@@ -198,6 +198,18 @@ answering "Safe" already gets 83 % accuracy. The model is therefore judged on **
 
 ## Screenshots
 
+### Production (Kubernetes on the team laptop)
+
+| Web app: a sample ride classified by the `@production` model | Grafana: service up, model version, no alert firing |
+|---|---|
+| ![Web app in production](docs/figures/prod_webapp.jpg) | ![Grafana in production](docs/figures/prod_grafana.jpg) |
+| **MLflow registry: `ride-classifier` v1 trained in the cluster, alias `@production`** | **API documentation (Swagger) served by the production API** |
+| ![MLflow registry in production](docs/figures/prod_mlflow_registry.jpg) | ![Swagger in production](docs/figures/prod_swagger.jpg) |
+| **GitHub Actions: CI, Docker Hub build and CD to the cluster all green** | |
+| ![GitHub Actions](docs/figures/prod_github_actions.jpg) | |
+
+### Development
+
 | MLflow registry: `@production` alias and promotion reason | Model files in the MinIO bucket |
 |---|---|
 | ![MLflow registry](docs/figures/mlflow_registry.png) | ![MinIO](docs/figures/minio_model_files.png) |
