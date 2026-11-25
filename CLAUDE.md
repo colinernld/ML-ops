@@ -87,14 +87,11 @@ Reckless**, with a full MLOps pipeline around it. Data: `Project.zip` on Inside 
 Tracked as GitHub issues (details and "done when" checklists there). Assign yourself on the issue, link
 it from your PR with `Closes #N`, and remove the line here once it is merged.
 
-- [#4](https://github.com/colinernld/ML-ops/issues/4) (MLflow, MinIO, Postgres on Kubernetes) and
-  [#5](https://github.com/colinernld/ML-ops/issues/5) (images on Docker Hub, URLs in the README) were done in
-  #12 – #14: close the issues after checking their "done when" lists.
-- **Before the deadline**: screenshots of production (Grafana dashboard, Prometheus alerts, `kubectl get pods`,
-  Actions runs) in `docs/figures/`, linked from the README and docs/monitoring.md.
-- [#7](https://github.com/colinernld/ML-ops/issues/7) **Results differ by environment** (5-fold CV with
-  torch 2.14.1: balanced accuracy 0.36, macro-F1 0.31 vs 0.44 / 0.36 in the README, still above the
-  baselines) and **both example rides are predicted "Safe overall"**: keep in mind for the API demo.
+- None blocking. #4, #5 and #7 are closed; production screenshots (web app, Grafana, MLflow registry, Swagger,
+  GitHub Actions) are in `docs/figures/prod_*.jpg` and linked from the README.
+- Known limitation to mention in the demo: 5-fold CV with torch 2.14.1 gives balanced accuracy 0.36 and
+  macro-F1 0.31 (0.44 / 0.36 in the original environment), still above the baselines; rare classes
+  (Reckless: 6 rides, Tandem: 18) are often missed.
 
 ## Conventions
 
